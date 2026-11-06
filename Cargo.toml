@@ -1,0 +1,38 @@
+[package]
+name = "florida-3pl"
+version = "2.0.0-dev"
+edition = "2021"
+description = "Florida 3PL warehouse orders: the Rust rewrite of the Python app, on MariaDB"
+
+[dependencies]
+anyhow = "1"
+axum = "0.7"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+csv = "1"
+dotenvy = "0.15"
+encoding_rs = "0.8"
+hex = "0.4"
+indexmap = "2"
+pbkdf2 = "0.12"
+quick-xml = "0.37"
+rand = "0.8"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+rpassword = "7"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "mysql", "chrono", "migrate", "macros"] }
+subtle = "2"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.5", features = ["fs", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

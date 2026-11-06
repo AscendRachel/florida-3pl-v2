@@ -1,0 +1,6 @@
+/target
+.env
+/db-data
+/data
+*.log
+/import-data

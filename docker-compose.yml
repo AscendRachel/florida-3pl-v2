@@ -1,0 +1,76 @@
+﻿# The database for the Rust app: MariaDB, and phpMyAdmin to look at it and manage it in the browser.
+#   docker compose up -d
+#   phpMyAdmin: http://localhost:8081   (sign in with the user and password from .env)
+# Both ports are bound to this PC only (127.0.0.1). Do not open them to the internet.
+services:
+  mariadb:
+    image: mariadb:11.4
+    container_name: florida-3pl-db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+      TZ: America/New_York
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--innodb-buffer-pool-size=256M", "--max-allowed-packet=64M"]
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - db-data:/var/lib/mysql   # the database files (a Docker volume: more reliable than a Windows folder for a database). Back up with mariadb-dump.
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # The Rust app itself. `docker compose up -d --build app` builds it and runs it at http://localhost:8765
+  app:
+    build: .
+    container_name: florida-3pl-rust
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql://${DB_USER}:${DB_PASSWORD}@mariadb:3306/${DB_NAME}
+    volumes:
+      - ./import-data:/import:ro   # a copy of the old app's data folder, for: florida-3pl import /import
+      - ./data:/app/data           # the Google API key (drive_key.txt) and files uploaded to the Import tab
+    ports:
+      - "127.0.0.1:8766:8765"
+
+  # For working on the code without Windows' Application Control blocking cargo's helper programs:
+  #   docker compose run --rm dev cargo check
+  dev:
+    profiles: ["dev"]
+    image: rust:1-bookworm
+    working_dir: /work
+    volumes:
+      - .:/work
+      - cargo-cache:/usr/local/cargo/registry
+      - target-cache:/work/target
+    environment:
+      DATABASE_URL: mysql://${DB_USER}:${DB_PASSWORD}@mariadb:3306/${DB_NAME}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  phpmyadmin:
+    image: phpmyadmin:5
+    container_name: florida-3pl-phpmyadmin
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      PMA_HOST: mariadb
+      UPLOAD_LIMIT: 256M
+    ports:
+      - "127.0.0.1:8081:80"
+
+volumes:
+  db-data:
+  cargo-cache:
+  target-cache:
+

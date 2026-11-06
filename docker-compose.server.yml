@@ -1,0 +1,63 @@
+# For the server (the domain): the Rust app + MariaDB + Caddy for HTTPS. People open https://your-domain (no port number).
+# Needs a DNS A record for the domain pointing to this server, and ports 80 and 443 open on it.
+# Only Caddy is reachable from outside. MariaDB and the app are NOT published. phpMyAdmin is not included on the server.
+#   1. copy .env.example to .env, set the passwords, and add a line: DOMAIN=orders.example.com
+#   2. docker compose -f docker-compose.server.yml up -d --build
+# If the server already runs its own Caddy, do not start this one: use only the mariadb and app services and add the
+# domain block from the Caddyfile to the existing Caddyfile (reverse_proxy to this app's container, port 8765).
+services:
+  mariadb:
+    image: mariadb:11.4
+    container_name: florida-3pl-db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+      TZ: America/New_York
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--innodb-buffer-pool-size=256M", "--max-allowed-packet=64M"]
+    volumes:
+      - db-data:/var/lib/mysql   # the database files: back up with mariadb-dump
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    container_name: florida-3pl-rust
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql://${DB_USER}:${DB_PASSWORD}@mariadb:3306/${DB_NAME}
+    expose:
+      - "8765"                     # only Caddy can reach it
+    volumes:
+      - ./import-data:/import:ro   # a copy of the old app's data folder, for: florida-3pl import /import
+      - ./data:/app/data           # the Google API key (drive_key.txt), the logo and uploaded files: keep and back up
+
+  caddy:
+    image: caddy:2
+    container_name: florida-3pl-caddy
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in the .env file, for example orders.example.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  db-data:
+  caddy_data:
+  caddy_config:
