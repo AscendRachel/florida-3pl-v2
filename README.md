@@ -47,7 +47,11 @@ answer the same addresses the same way. That is what phases 2 to 4 do, one tab a
 ## The first admin
 
 If the old data was imported, the old accounts (and their passwords) came with it, so no new admin is needed.
-For a fresh, empty database, make the first admin **on the server**. It is deliberately not possible through the web page.
+For a fresh, empty database, the first admin is made **on the server**, never through the web page. Two ways:
+
+**A. From `.env` (no terminal needed).** Put `ADMIN_USERNAME` and `ADMIN_PASSWORD` (10+ characters, no `$`) in `.env` before the first start. When the app starts and there are no accounts at all, it creates that admin. If any account exists, it does nothing. Sign in, change the password on your account, then delete `ADMIN_PASSWORD` from `.env`.
+
+**B. With the command:**
 
 1. Start the database and the app once, so the tables exist:
    ```
@@ -87,9 +91,9 @@ Differences from the old app, on purpose:
 
 `docker-compose.server.yml` runs MariaDB, the app (the image `ascendrachel/florida-3pl-v2` from Docker Hub), phpMyAdmin and Caddy. Only Caddy is open to the internet (ports 80 and 443); MariaDB, the app and phpMyAdmin are not published. Caddy serves one address:
 - `https://DOMAIN`: the app.
-- `https://DOMAIN/phpmyadmin`: phpMyAdmin, only for **admins holding a valid JWT**. The JWT is signed with `JWT_SECRET` from `.env`. An admin gets it by being signed in to the app and opening `https://DOMAIN/pma-login` (opening `/phpmyadmin` sends them there by itself); it lasts 8 hours and stops working at once if the admin is removed. Without it, Caddy never lets the request reach phpMyAdmin. phpMyAdmin then still asks for the database user and password.
+- `https://DOMAIN/phpmyadmin`: phpMyAdmin, behind three locks. (1) A browser password prompt (basic auth, `PMA_BASIC_AUTH_USER` / `PMA_BASIC_AUTH_HASH`), checked by Caddy. (2) A valid **JWT**, signed with `JWT_SECRET` from `.env`: an admin gets it by being signed in to the app and opening `/phpmyadmin` (they are sent to `/pma-login` by themselves); it lasts 8 hours and stops working at once if the admin is removed. (3) phpMyAdmin's own database user and password. Without the first two, Caddy never lets the request reach phpMyAdmin.
 
-1. `.env`: set the passwords, `DOMAIN` and `JWT_SECRET` (`openssl rand -hex 32`; see `.env.example`). `DOMAIN` needs a DNS A record pointing to the server.
+1. `.env`: set `DOMAIN`, `DB_ROOT_PASSWORD`, `DB_PASSWORD`, `JWT_SECRET` (`openssl rand -hex 32`), `PMA_BASIC_AUTH_USER` and `PMA_BASIC_AUTH_HASH` (made with `docker run --rm caddy:2-alpine caddy hash-password --plaintext 'your-password'`, every `$` written as `$$`), and optionally `ADMIN_USERNAME` / `ADMIN_PASSWORD` for the first admin (see `.env.example`). `DOMAIN` needs a DNS A record pointing to the server. There is no `APP_PORT`: the app is only reachable through Caddy.
 2. `docker compose -f docker-compose.server.yml up -d`
 3. If the server already runs its own Caddy, start only `mariadb`, `app` and `phpmyadmin` and add the block from `Caddyfile` to the existing one.
 

@@ -13,14 +13,19 @@
 	# phpMyAdmin at https://DOMAIN/phpmyadmin. Before every request Caddy asks the app (/api/pma-auth) whether the browser holds a valid
 	# JWT (signed with JWT_SECRET from .env) that an admin received at /pma-login. If not, the visitor is sent to /pma-login
 	# (and from there to the sign-in page). phpMyAdmin then still asks for the database user and password.
+	# A first lock in front of that: a browser password prompt (basic auth) with PMA_BASIC_AUTH_USER / PMA_BASIC_AUTH_HASH.
 	@pma path /phpmyadmin /phpmyadmin/*
 	route @pma {
+		basic_auth {
+			{$PMA_BASIC_AUTH_USER} {$PMA_BASIC_AUTH_HASH}
+		}
 		forward_auth app:8765 {
 			uri /api/pma-auth
 		}
 		uri strip_prefix /phpmyadmin
 		reverse_proxy phpmyadmin:80 {
 			header_up X-Forwarded-For {remote_host}
+			header_up -Authorization   # the basic-auth login is for Caddy only; phpMyAdmin does not need to see it
 		}
 	}
 

@@ -52,6 +52,8 @@ services:
       DATABASE_URL: mysql://${DB_USER}:${DB_PASSWORD}@mariadb:3306/${DB_NAME}
       HTTPS_ONLY: "1"             # sign-in cookies are always Secure, browsers are told to use HTTPS only
       JWT_SECRET: "${JWT_SECRET:?set JWT_SECRET in the .env file (at least 32 random characters, e.g. openssl rand -hex 32)}"   # signs the pass for /phpmyadmin
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-}"   # optional: the first admin, made at start only when there are no accounts yet
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
     expose:
       - "8765"                     # only Caddy can reach it
     read_only: true                # the program cannot change its own files
@@ -105,6 +107,8 @@ services:
       - "443:443/udp"
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in the .env file, for example orders.example.com}
+      PMA_BASIC_AUTH_USER: ${PMA_BASIC_AUTH_USER:?set PMA_BASIC_AUTH_USER in the .env file}
+      PMA_BASIC_AUTH_HASH: "${PMA_BASIC_AUTH_HASH:?set PMA_BASIC_AUTH_HASH in the .env file (see .env.example)}"
     cap_drop:
       - ALL
     cap_add:

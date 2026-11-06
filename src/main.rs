@@ -118,6 +118,18 @@ async fn main() -> anyhow::Result<()> {
         None => {}
     }
 
+    // A brand-new server with no accounts: make the first admin from ADMIN_USERNAME / ADMIN_PASSWORD in the .env (the same
+    // as `create-admin`, without a terminal). Does nothing once any account exists, so the .env password can be removed afterwards.
+    if let (Ok(u), Ok(p)) = (std::env::var("ADMIN_USERNAME"), std::env::var("ADMIN_PASSWORD")) {
+        if !u.trim().is_empty() && !p.is_empty() && auth::user_count(&db).await.unwrap_or(1) == 0 {
+            match auth::add_user(&db, &u, "Administrator", &p, "admin", None).await {
+                Ok(name) => tracing::info!("first admin \"{name}\" created from ADMIN_USERNAME / ADMIN_PASSWORD. Sign in, change the password, then remove ADMIN_PASSWORD from .env"),
+                Err(error::AppError::Bad(t)) => tracing::warn!("could not create the first admin from the .env: {t}"),
+                Err(_) => tracing::warn!("could not create the first admin from the .env"),
+            }
+        }
+    }
+
     let sch = schema::Schema::load(&db).await?;
     sch.make_view(&db).await.context("could not create the orders_text view")?;
     tracing::info!("{} columns, text view ready", sch.n());
