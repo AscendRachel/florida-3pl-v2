@@ -24,6 +24,9 @@ fn host_of_origin(origin: &str) -> &str {
 
 pub async fn harden(req: Request, next: Next) -> Response {
     let method = req.method().clone();
+    // the pages' own files (js, css) must be re-checked on every load, so a proxy cache (Cloudflare) or the browser never keeps an old
+    // version after an update (they still answer "not modified" quickly when nothing changed)
+    let is_static = req.uri().path().starts_with("/static/");
     let h = req.headers();
     let via_https = https_only() || h.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) == Some("https");
 
@@ -54,6 +57,9 @@ pub async fn harden(req: Request, next: Next) -> Response {
     put("cross-origin-opener-policy", "same-origin");
     put("cross-origin-resource-policy", "same-origin");
     put("content-security-policy", CSP);
+    if is_static {
+        put("cache-control", "no-cache, must-revalidate");
+    }
     if via_https {
         put("strict-transport-security", "max-age=31536000; includeSubDomains");
     }
