@@ -44,10 +44,23 @@ answer the same addresses the same way. That is what phases 2 to 4 do, one tab a
    It prints the number of rows copied for each table. Dates and numbers that do not fit their column are kept in `import_rejects`.
 3. People sign in with the passwords they already have (same PBKDF2 hashes as the Python app).
 
-For a fresh database with no old data, make the first admin on the server:
-```
-docker compose run --rm app /app/florida-3pl create-admin
-```
+## The first admin
+
+If the old data was imported, the old accounts (and their passwords) came with it, so no new admin is needed.
+For a fresh, empty database, make the first admin **on the server**. It is deliberately not possible through the web page.
+
+1. Start the database and the app once, so the tables exist:
+   ```
+   docker compose -f docker-compose.server.yml up -d --build
+   ```
+2. Run the command below. It asks for a username (3 to 30 letters, numbers, `.` `-` `_`), a display name and a password of 10 or more characters (typed without showing). It needs a real terminal, so keep `-it`:
+   ```
+   docker compose -f docker-compose.server.yml run --rm -it app /app/florida-3pl create-admin
+   ```
+3. Open the domain and sign in. Add everybody else on the **Team** page, and give them a temporary password.
+
+On a PC (not the server), leave out `-f docker-compose.server.yml`.
+The command can be run again later to add another admin (a taken username is refused).
 
 Check: http://localhost:8766/api/health shows the number of tables and orders.
 
