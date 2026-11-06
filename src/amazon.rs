@@ -16,6 +16,7 @@
 //! until an admin confirms it.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 use std::time::Instant;
 
 use axum::body::Bytes;
@@ -62,7 +63,8 @@ pub struct Change {
 pub type Plans = std::sync::Arc<std::sync::Mutex<HashMap<String, (Instant, std::sync::Arc<Plan>)>>>;
 
 fn words(text: &str) -> HashSet<String> {
-    Regex::new(r"[a-z0-9]+").unwrap().find_iter(&text.to_lowercase()).map(|m| m.as_str().to_string()).filter(|w| w.len() > 2).collect()
+    static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[a-z0-9]+").unwrap());
+    WORD.find_iter(&text.to_lowercase()).map(|m| m.as_str().to_string()).filter(|w| w.len() > 2).collect()
 }
 
 /// 0..1: how much of the shorter title's words the other title has too.
@@ -81,7 +83,9 @@ fn to_int(v: &str) -> i64 {
 /// Excel keeps only 15 digits of a number, so a longer one cannot be rebuilt: it is returned unchanged.
 pub fn plain_number(text: &str) -> String {
     let t = text.trim();
-    let Some(c) = Regex::new(r"^(-?)(\d+)(?:\.(\d+))?[eE]\+?(\d+)$").unwrap().captures(t) else { return text.to_string() };
+    // built once: this runs for every cell of an imported sheet (millions of times), and building a pattern each time took minutes
+    static SCI: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(-?)(\d+)(?:\.(\d+))?[eE]\+?(\d+)$").unwrap());
+    let Some(c) = SCI.captures(t) else { return text.to_string() };
     let (int_part, frac, exp) = (&c[2], c.get(3).map_or("", |m| m.as_str()), c[4].parse::<usize>().unwrap_or(0));
     if frac.len() > exp {
         return text.to_string(); // not a whole number
@@ -114,13 +118,16 @@ fn eta_column(fieldnames: &[String]) -> Option<String> {
 fn parse_date(text: &str) -> String {
     let t = text.trim();
     let months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    static ISO: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d{4})-(\d{1,2})-(\d{1,2})").unwrap());
+    static SLASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d{1,2})/(\d{1,2})/(\d{2,4})").unwrap());
+    static WORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})").unwrap());
     let (y, mo, d);
-    if let Some(m) = Regex::new(r"(\d{4})-(\d{1,2})-(\d{1,2})").unwrap().captures(t) {
+    if let Some(m) = ISO.captures(t) {
         (y, mo, d) = (m[1].parse::<i32>().unwrap_or(0), m[2].parse::<u32>().unwrap_or(0), m[3].parse::<u32>().unwrap_or(0));
-    } else if let Some(m) = Regex::new(r"(\d{1,2})/(\d{1,2})/(\d{2,4})").unwrap().captures(t) {
+    } else if let Some(m) = SLASH.captures(t) {
         let yy = m[3].parse::<i32>().unwrap_or(0);
         (y, mo, d) = (if yy < 100 { yy + 2000 } else { yy }, m[1].parse::<u32>().unwrap_or(0), m[2].parse::<u32>().unwrap_or(0));
-    } else if let Some(m) = Regex::new(r"([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})").unwrap().captures(t) {
+    } else if let Some(m) = WORDS.captures(t) {
         let Some(i) = months.iter().position(|x| *x == m[1].to_lowercase()) else { return String::new() };
         (y, mo, d) = (m[3].parse::<i32>().unwrap_or(0), i as u32 + 1, m[2].parse::<u32>().unwrap_or(0));
     } else {

@@ -35,8 +35,9 @@ fn month_number(m: &str) -> Option<u32> {
 
 /// "Mar 6, 2026" or "Mar 6, 2026 3:04 PM" -> "2026-03-06" / "2026-03-06 15:04"; anything else is returned as it is.
 pub fn norm_date(s: &str) -> String {
-    let re = Regex::new(r"^\s*([A-Za-z]{3})\s+(\d{1,2}),\s*(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM))?\s*$").unwrap();
-    let Some(m) = re.captures(s) else { return s.to_string() };
+    // built once (this runs for every date cell of an imported sheet)
+    static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(r"^\s*([A-Za-z]{3})\s+(\d{1,2}),\s*(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM))?\s*$").unwrap());
+    let Some(m) = RE.captures(s) else { return s.to_string() };
     let Some(mo) = month_number(&m[1]) else { return s.to_string() };
     let mut out = format!("{:04}-{:02}-{:02}", m[3].parse::<u32>().unwrap_or(0), mo, m[2].parse::<u32>().unwrap_or(0));
     if let Some(h) = m.get(4) {
