@@ -170,6 +170,7 @@ export async function mount(el) {
       stopBar();
       btn.disabled = false; btn.textContent = "Import orders";
       toast(err.message, "bad");
+      $("#result").innerHTML = `<div class="banner bad"><b>The import did not finish.</b> ${esc(err.message)}</div>`; // stays on the page, the pop-up goes away
     }
   };
   draw();

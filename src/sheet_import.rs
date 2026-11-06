@@ -428,10 +428,21 @@ pub async fn run_import(_a: AdminUser, State(s): State<AppState>, Json(b): Json<
         tokio::spawn(async move {
             let _guard = guard;
             let res = do_import(&s, &mode, &id, &sheet, &token).await;
-            let done = match res {
-                Ok(Json(result)) => json!({ "pct": 100, "text": "Done.", "done": true, "result": result }),
-                Err(e) => json!({ "pct": null, "text": "Failed", "done": true, "error": error_text(e) }),
+            let (done, last) = match res {
+                Ok(Json(result)) => {
+                    tracing::info!("import finished: {} orders", result["rows"]);
+                    (json!({ "pct": 100, "text": "Done.", "done": true, "result": result }), json!({ "ok": true, "rows": result["rows"] }))
+                }
+                Err(e) => {
+                    let text = error_text(e);
+                    tracing::warn!("import failed: {text}");
+                    (json!({ "pct": null, "text": "Failed", "done": true, "error": text }), json!({ "ok": false, "error": text }))
+                }
             };
+            // kept in the database too, so the last import's result can always be looked up (app_settings, key orders.import_last)
+            let mut last = last;
+            last["at"] = json!(clock::now().format("%Y-%m-%dT%H:%M:%S").to_string());
+            let _ = sqlx::query("REPLACE INTO app_settings (k, v) VALUES ('orders.import_last', ?)").bind(last.to_string()).execute(&s.db).await;
             if let Ok(mut p) = s.progress.lock() {
                 p.insert(token, done);
             }
