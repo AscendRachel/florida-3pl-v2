@@ -1,9 +1,24 @@
-# Caddy gets and renews the HTTPS certificate by itself and passes X-Forwarded-Proto / X-Forwarded-For to the app.
+# Caddy gets and renews the HTTPS certificate by itself, sends only HTTPS (port 80 is only redirected), and passes
+# X-Forwarded-Proto / X-Forwarded-For to the app. The app believes those headers only from Caddy.
 {$DOMAIN} {
 	encode gzip
 	# big enough for the Import tab's uploads
 	request_body {
 		max_size 256MB
 	}
-	reverse_proxy app:8765
+	header {
+		-Server
+	}
+	reverse_proxy app:8765 {
+		# anything the visitor sent as X-Forwarded-* is replaced by what Caddy saw
+		header_up X-Forwarded-For {remote_host}
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 5m
+		}
+	}
+	log {
+		output stdout
+		format console
+	}
 }

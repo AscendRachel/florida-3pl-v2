@@ -48,7 +48,7 @@ fetch("/api/build", { cache: "no-store" }).then((r) => r.json()).then(({ version
       $("title").textContent = "Create the admin account";
       $("sub").textContent = "This is the first start. Pick a name, username and password for yourself. You can add the rest of the team afterwards.";
       $("nameRow").hidden = false; $("go").textContent = "Create account"; $("pw").autocomplete = "new-password";
-      $("pwLabel").textContent = "Password (8+ characters)";
+      $("pwLabel").textContent = "Password (10+ characters)";
     }
   } catch { show("Can't reach the server.", "bad"); }
 })();

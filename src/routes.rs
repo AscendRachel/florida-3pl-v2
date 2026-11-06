@@ -21,6 +21,7 @@ use crate::{clock, AppState};
 
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_FAILS: usize = 8;
+const MAX_FAILS_PER_USER: usize = 30;
 const FAIL_WINDOW: Duration = Duration::from_secs(600);
 
 pub fn router(state: AppState) -> Router {
@@ -87,6 +88,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/dashboard", get(crate::dashboard::dashboard))
         .route("/api/dashboard/operators", post(crate::dashboard::save_operators))
         .layer(TraceLayer::new_for_http())
+        .layer(axum::middleware::from_fn(crate::security::harden))
         .with_state(state)
 }
 
@@ -116,11 +118,18 @@ async fn login_page(State(s): State<AppState>) -> AppResult<Response> {
 // ---------------------------------------------------------------- small public answers
 
 /// Is the program up, is the database answering, and how much is in it.
-async fn health(State(s): State<AppState>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let fail = |e: sqlx::Error| (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "ok": false, "error": e.to_string() })));
+async fn health(State(s): State<AppState>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let fail = |e: sqlx::Error| {
+        tracing::error!("health check: {e}");
+        (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "ok": false })))
+    };
     let tables: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()").fetch_one(&s.db).await.map_err(fail)?;
-    let orders: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orders").fetch_one(&s.db).await.map_err(fail)?;
-    Ok(Json(json!({ "ok": true, "app": APP_VERSION, "tables": tables, "orders": orders })))
+    // The numbers are only for someone on the server itself (no proxy in between); the internet only learns "ok".
+    if headers.get("x-forwarded-for").is_none() && is_internal(&peer.ip()) {
+        let orders: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orders").fetch_one(&s.db).await.map_err(fail)?;
+        return Ok(Json(json!({ "ok": true, "app": APP_VERSION, "tables": tables, "orders": orders })));
+    }
+    Ok(Json(json!({ "ok": true })))
 }
 
 /// A short fingerprint of everything in web/, so open pages can tell when a new version of the app is ready.
@@ -176,15 +185,27 @@ async fn version(_u: CurrentUser, State(s): State<AppState>) -> Json<Value> {
 
 // ---------------------------------------------------------------- sign in
 
-fn client_ip(headers: &HeaderMap, peer: &SocketAddr) -> String {
-    match headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-        Some(f) => f.split(',').next().unwrap_or("").trim().to_string(),
-        None => peer.ip().to_string(),
+/// Loopback or a private network address (Docker's own network included): a proxy on the same machine, not the internet.
+fn is_internal(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v) => v.is_loopback() || v.is_private() || v.is_link_local(),
+        std::net::IpAddr::V6(v) => v.is_loopback() || (v.segments()[0] & 0xfe00) == 0xfc00,
     }
 }
 
+/// Who is asking. X-Forwarded-For is believed only when it comes from our own proxy (Caddy), so nobody can pick a fake
+/// address to get around the sign-in limit.
+fn client_ip(headers: &HeaderMap, peer: &SocketAddr) -> String {
+    if is_internal(&peer.ip()) {
+        if let Some(f) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+            return f.split(',').next().unwrap_or("").trim().chars().take(64).collect();
+        }
+    }
+    peer.ip().to_string()
+}
+
 fn is_https(headers: &HeaderMap) -> bool {
-    headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) == Some("https")
+    crate::security::https_only() || headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) == Some("https")
 }
 
 fn text<'a>(b: &'a Value, key: &str) -> &'a str {
@@ -198,16 +219,27 @@ async fn setup_needed(State(s): State<AppState>) -> AppResult<Json<Value>> {
 
 async fn login(State(s): State<AppState>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, Json(b): Json<Value>) -> AppResult<Response> {
     let ip = client_ip(&headers, &peer);
+    // Two limits: per address (8 misses) and per account name (30 misses from anywhere, so a spread-out guesser is slowed too).
+    let uname: String = text(&b, "username").trim().to_lowercase().chars().filter(|c| !c.is_control()).take(40).collect();
+    let user_key = format!("user:{uname}");
     {
         let mut failed = s.failed.lock().unwrap();
-        let list = failed.entry(ip.clone()).or_default();
-        list.retain(|t| t.elapsed() < FAIL_WINDOW);
-        if list.len() >= MAX_FAILS {
+        failed.retain(|_, v| {
+            v.retain(|t| t.elapsed() < FAIL_WINDOW);
+            !v.is_empty()
+        });
+        let over_ip = failed.get(&ip).is_some_and(|l| l.len() >= MAX_FAILS);
+        let over_user = failed.get(&user_key).is_some_and(|l| l.len() >= MAX_FAILS_PER_USER);
+        if over_ip || over_user {
+            tracing::warn!(target: "security", "sign-in blocked (too many misses) ip={ip} user={uname}");
             return Err(AppError::TooMany("Too many failed sign-ins. Wait 10 minutes and try again.".into()));
         }
     }
     let Some(user) = auth::check_login(&s.db, text(&b, "username"), text(&b, "password")).await? else {
-        s.failed.lock().unwrap().entry(ip).or_default().push(Instant::now());
+        tracing::warn!(target: "security", "failed sign-in ip={ip} user={uname}");
+        let mut failed = s.failed.lock().unwrap();
+        failed.entry(ip).or_default().push(Instant::now());
+        failed.entry(user_key).or_default().push(Instant::now());
         return Err(AppError::Unauthorized_with("Wrong username or password."));
     };
     s.failed.lock().unwrap().remove(&ip);

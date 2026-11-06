@@ -32,7 +32,7 @@ export async function mount(el, params, ctx) {
         const r = await dialog({
           title: "Add team member",
           body: `<label class="field"><span>Name</span><input name="name" required></label><label class="field"><span>Username</span><input name="username" required autocapitalize="off" autocomplete="off"></label>
-                 <label class="field"><span>Temporary password (8+ characters)</span><input name="password" minlength="8" required autocomplete="new-password"></label>
+                 <label class="field"><span>Temporary password (10+ characters)</span><input name="password" minlength="10" required autocomplete="new-password"></label>
                  <label class="field"><span>Role</span><select name="role">${roleOptions("member")}</select></label>
                  ${tabBoxes(null)}<p class="hint">The tab choice applies to members. Admins always see every tab.</p>`,
           actions: [["Cancel", "close"], ["Add", "ok", "primary"]],
@@ -70,7 +70,7 @@ export async function mount(el, params, ctx) {
       }
       const rs = t.closest("[data-reset]");
       if (rs) {
-        const r = await dialog({ title: "Reset password for " + rs.dataset.reset, body: `<label class="field"><span>New password (8+ characters)</span><input name="password" minlength="8" required autocomplete="new-password"></label><p class="hint">They are signed out everywhere and use the new password next time.</p>`, actions: [["Cancel", "close"], ["Reset", "ok", "primary"]] });
+        const r = await dialog({ title: "Reset password for " + rs.dataset.reset, body: `<label class="field"><span>New password (10+ characters)</span><input name="password" minlength="10" required autocomplete="new-password"></label><p class="hint">They are signed out everywhere and use the new password next time.</p>`, actions: [["Cancel", "close"], ["Reset", "ok", "primary"]] });
         if (r.value === "ok") {
           await api("/api/team/reset", { username: rs.dataset.reset, password: new FormData(r.el.querySelector("form")).get("password") });
           toast("Password reset.");

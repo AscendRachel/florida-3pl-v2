@@ -55,7 +55,7 @@ document.addEventListener("click", async (e) => {
     const r = await dialog({
       title: "Change your password",
       body: `<label class="field"><span>Current password</span><input type="password" name="cur" autocomplete="current-password" required></label>
-             <label class="field"><span>New password (8+ characters)</span><input type="password" name="new" autocomplete="new-password" minlength="8" required></label>`,
+             <label class="field"><span>New password (10+ characters)</span><input type="password" name="new" autocomplete="new-password" minlength="10" required></label>`,
       actions: [["Cancel", "close"], ["Change password", "ok", "primary"]],
     });
     if (r.value !== "ok") return;

@@ -19,7 +19,7 @@ use crate::error::{AppError, AppResult};
 use crate::{clock, AppState};
 
 pub const COOKIE_NAME: &str = "f3pl_session";
-pub const SESSION_DAYS: i64 = 30;
+pub const SESSION_DAYS: i64 = 14;
 pub const ROLES: [&str; 3] = ["admin", "warehouse", "member"];
 /// The tabs an admin can hand out to a member (Amazon Orders, Import, Team and Admin are admin-only).
 pub const TABS: [&str; 6] = ["dashboard", "scan", "cards", "orders", "returns", "materials"];
@@ -111,8 +111,11 @@ fn new_salt() -> String {
 }
 
 fn check_password_rules(password: &str) -> AppResult<()> {
-    if password.chars().count() < 8 {
-        return Err(AppError::bad("Password must be at least 8 characters."));
+    if password.chars().count() < 10 {
+        return Err(AppError::bad("Password must be at least 10 characters."));
+    }
+    if password.chars().count() > 200 {
+        return Err(AppError::bad("Password can be up to 200 characters."));
     }
     Ok(())
 }

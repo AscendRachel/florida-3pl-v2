@@ -23,6 +23,7 @@ mod returns;
 mod routes;
 mod scan;
 mod schema;
+mod security;
 mod sheet_import;
 mod settings;
 mod team_api;
@@ -159,7 +160,7 @@ async fn create_admin(db: &MySqlPool) -> anyhow::Result<()> {
     };
     let username = ask("Username")?;
     let name = ask("Display name")?;
-    print!("Password (8+ characters): ");
+    print!("Password (10+ characters): ");
     std::io::stdout().flush()?;
     let password = rpassword::read_password()?;
     match auth::add_user(db, &username, &name, &password, "admin", None).await {
