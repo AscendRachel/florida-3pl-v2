@@ -18,7 +18,8 @@ Do the VM part before the domain goes live.
 - The Google API key lives in `data/drive_key.txt` on the server, not in the code or in git.
 
 **The containers (`docker-compose.server.yml`)**
-- Only Caddy is reachable from the internet (ports 80 and 443). MariaDB and the app publish no ports.
+- Only Caddy is reachable from the internet (ports 80 and 443). MariaDB, the app and phpMyAdmin publish no ports.
+- phpMyAdmin is reached only through Caddy at its own address (`PMA_DOMAIN`), over HTTPS, and only from the addresses in `PMA_ALLOW`; everybody else gets 403 before phpMyAdmin is touched. It still asks for the database user and password. Keep `PMA_ALLOW` to your IT head's office/VPN address, never "everyone".
 - MariaDB is on a private Docker network with no route to the internet; the root account works only inside its own container.
 - The app runs as a normal user, with a read-only filesystem, all Linux capabilities dropped, `no-new-privileges`, a 1 GB memory limit and a process limit.
 - Caddy handles the HTTPS certificate and renews it by itself; HTTP is redirected to HTTPS.

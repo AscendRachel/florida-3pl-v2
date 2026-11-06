@@ -85,10 +85,15 @@ Differences from the old app, on purpose:
 
 ## On the server (domain + HTTPS with Caddy)
 
-`docker-compose.server.yml` runs MariaDB, the app and Caddy. Only Caddy is open to the internet (ports 80 and 443); MariaDB and the app are not published, and phpMyAdmin is left out.
-1. `.env`: set the passwords and add `DOMAIN=orders.example.com` (a DNS A record for it must point to the server).
-2. `docker compose -f docker-compose.server.yml up -d --build`
-3. If the server already runs its own Caddy, start only `mariadb` and `app` and add the block from `Caddyfile` to the existing one.
+`docker-compose.server.yml` runs MariaDB, the app (the image `ascendrachel/florida-3pl-v2` from Docker Hub), phpMyAdmin and Caddy. Only Caddy is open to the internet (ports 80 and 443); MariaDB, the app and phpMyAdmin are not published. Caddy serves two addresses:
+- `https://DOMAIN`: the app.
+- `https://PMA_DOMAIN`: phpMyAdmin, only for the addresses listed in `PMA_ALLOW`; everybody else gets 403 from Caddy.
+
+1. `.env`: set the passwords and add `DOMAIN`, `PMA_DOMAIN` and `PMA_ALLOW` (see `.env.example`). Both names need a DNS A record pointing to the server.
+2. `docker compose -f docker-compose.server.yml up -d`
+3. If the server already runs its own Caddy, start only `mariadb`, `app` and `phpmyadmin` and add both blocks from `Caddyfile` to the existing one.
+
+To build the app from the source instead of pulling the image, replace the `image:` line of `app` with `build: .` and use `up -d --build`.
 
 ## Back up
 

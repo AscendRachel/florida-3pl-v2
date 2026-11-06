@@ -1,11 +1,12 @@
-# For the server (the domain): the Rust app + MariaDB + Caddy for HTTPS. People open https://your-domain (no port number).
-# Needs a DNS A record for the domain pointing to this server, and ports 80 and 443 open on it.
+# For the server (the domain): the Rust app (image from Docker Hub) + MariaDB + phpMyAdmin + Caddy for HTTPS.
+# People open https://DOMAIN (the app) and, from allowed addresses only, https://PMA_DOMAIN (phpMyAdmin): no port numbers.
+# Needs DNS A records for both names pointing to this server, and ports 80 and 443 open on it.
 # Hardened: only Caddy is reachable from outside; the database sits on a private network with no way out to the internet;
-# containers run without extra privileges, the app with a read-only filesystem. phpMyAdmin is not included on the server.
-#   1. copy .env.example to .env, set STRONG passwords, and add a line: DOMAIN=orders.example.com
-#   2. docker compose -f docker-compose.server.yml up -d --build
-# If the server already runs its own Caddy, do not start this one: use only the mariadb and app services and add the
-# domain block from the Caddyfile to the existing Caddyfile (reverse_proxy to this app's container, port 8765).
+# containers run without extra privileges, the app with a read-only filesystem.
+#   1. copy .env.example to .env, set STRONG passwords, and add DOMAIN, PMA_DOMAIN and PMA_ALLOW (see .env.example)
+#   2. docker compose -f docker-compose.server.yml up -d
+# If the server already runs its own Caddy, do not start this one: start only mariadb, app and phpmyadmin, and add both
+# blocks from the Caddyfile to the existing Caddyfile (reverse_proxy to florida-3pl-rust:8765 and florida-3pl-phpmyadmin:80).
 # See HARDENING.md for the server itself (firewall, SSH, updates, backups).
 x-logging: &logging
   driver: json-file
@@ -40,7 +41,8 @@ services:
     logging: *logging
 
   app:
-    build: .
+    image: ascendrachel/florida-3pl-v2:latest   # pulled from Docker Hub (no building on the server). To build from the source instead: replace this line with `build: .`
+    pull_policy: always
     container_name: florida-3pl-rust
     restart: unless-stopped
     depends_on:
@@ -68,18 +70,42 @@ services:
       - front                      # lets it be reached by Caddy and reach Google (Drive names, returns sheet)
     logging: *logging
 
+  # phpMyAdmin: not published; reached only through Caddy at https://PMA_DOMAIN, and Caddy lets in only the addresses in PMA_ALLOW.
+  phpmyadmin:
+    image: phpmyadmin:5
+    container_name: florida-3pl-phpmyadmin
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      PMA_HOST: mariadb
+      PMA_ABSOLUTE_URI: https://${PMA_DOMAIN:?set PMA_DOMAIN in the .env file, for example db.example.com}/
+      UPLOAD_LIMIT: 256M
+    expose:
+      - "80"
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - private                   # to reach MariaDB
+      - front                     # to be reached by Caddy
+    logging: *logging
+
   caddy:
     image: caddy:2
     container_name: florida-3pl-caddy
     restart: unless-stopped
     depends_on:
       - app
+      - phpmyadmin
     ports:
       - "80:80"
       - "443:443"
       - "443:443/udp"
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in the .env file, for example orders.example.com}
+      PMA_DOMAIN: ${PMA_DOMAIN:?set PMA_DOMAIN in the .env file, for example db.example.com}
+      PMA_ALLOW: "${PMA_ALLOW:?set PMA_ALLOW in the .env file (the addresses allowed to open phpMyAdmin, for example 203.0.113.5 or 203.0.113.0/24)}"
     cap_drop:
       - ALL
     cap_add:

@@ -1,5 +1,7 @@
-# Caddy gets and renews the HTTPS certificate by itself, sends only HTTPS (port 80 is only redirected), and passes
+# Caddy gets and renews the HTTPS certificates by itself, sends only HTTPS (port 80 is only redirected), and passes
 # X-Forwarded-Proto / X-Forwarded-For to the app. The app believes those headers only from Caddy.
+
+# The app
 {$DOMAIN} {
 	encode gzip
 	# big enough for the Import tab's uploads
@@ -16,6 +18,35 @@
 			dial_timeout 5s
 			response_header_timeout 5m
 		}
+	}
+	log {
+		output stdout
+		format console
+	}
+}
+
+# phpMyAdmin (the database manager): only the addresses in PMA_ALLOW (space-separated, e.g. "203.0.113.5 198.51.100.0/24") get in.
+# Everybody else gets 403 from Caddy; they never reach phpMyAdmin. It still asks for the database user and password.
+{$PMA_DOMAIN} {
+	encode gzip
+	@allowed remote_ip {$PMA_ALLOW}
+	handle @allowed {
+		request_body {
+			max_size 256MB
+		}
+		header {
+			-Server
+			X-Content-Type-Options nosniff
+			X-Frame-Options SAMEORIGIN
+			Referrer-Policy same-origin
+			Strict-Transport-Security "max-age=31536000"
+		}
+		reverse_proxy phpmyadmin:80 {
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+	handle {
+		respond "Forbidden" 403
 	}
 	log {
 		output stdout
