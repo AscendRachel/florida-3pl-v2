@@ -146,7 +146,18 @@ export async function mount(el) {
     btn.disabled = true; btn.textContent = "Importing…";
     const pb = startBar(mode === "dropdowns" ? "Updating the dropdown lists" : "Importing orders");
     try {
-      const r = await api("/api/import", { id: up.id, sheet, mode, token: pb.token });
+      // The import runs on the server in the background, so a proxy that cuts long requests (Cloudflare: 100 seconds) cannot stop it.
+      // The page asks for the progress until the server says it is done.
+      let r = await api("/api/import", { id: up.id, sheet, mode, token: pb.token, background: true });
+      if (r.started) {
+        let misses = 0;
+        for (;;) {
+          await new Promise((ok) => setTimeout(ok, 1500));
+          let p = null;
+          try { p = await api("/api/progress?token=" + pb.token); misses = 0; } catch { if (++misses > 40) throw new Error("Lost contact with the server. Reload the page and check All Orders: the import may have finished."); }
+          if (p && p.done) { if (p.error) throw new Error(p.error); r = p.result; break; }
+        }
+      }
       stopBar();
       meta.total = (mode === "replace" ? 0 : meta.total) + r.rows;
       up = null; draw();

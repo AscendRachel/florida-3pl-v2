@@ -391,6 +391,25 @@ async fn attach_custom_dropdowns(conn: &mut sqlx::MySqlConnection, sch: &Schema)
     Ok(())
 }
 
+/// Only one import runs at a time (two at once would fight over the same tables and the small server's memory).
+static IMPORT_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// What the page is told when a background import fails (the details are in the server log).
+fn error_text(e: AppError) -> String {
+    match e {
+        AppError::Bad(t) | AppError::Denied(t) | AppError::Forbidden(t) | AppError::TooMany(t) => t,
+        AppError::Unauthorized => "Please sign in.".into(),
+        AppError::NotFound => "Not found".into(),
+        AppError::Internal(err) => {
+            tracing::error!("import failed: {err:#}");
+            "Something went wrong on the server while importing. Nothing was changed.".into()
+        }
+    }
+}
+
+/// With `"background": true` the import keeps running on the server even if the connection closes (a proxy such as Cloudflare cuts
+/// requests at 100 seconds, which a big sheet on a small server can exceed); the request answers at once and the page follows
+/// `/api/progress?token=...`, which ends with `done: true` and the `result` or an `error`. Without it, the request waits for the result.
 pub async fn run_import(_a: AdminUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
     let mode = b.get("mode").and_then(Value::as_str).unwrap_or("").to_string();
     if !["replace", "append", "dropdowns"].contains(&mode.as_str()) {
@@ -398,6 +417,42 @@ pub async fn run_import(_a: AdminUser, State(s): State<AppState>, Json(b): Json<
     }
     let (id, sheet) = (b.get("id").and_then(Value::as_str).unwrap_or("").to_string(), b.get("sheet").and_then(Value::as_str).unwrap_or("").to_string());
     let token: String = b.get("token").and_then(Value::as_str).unwrap_or("").chars().take(40).collect();
+    if !s.uploads.lock().unwrap().contains_key(&id) {
+        return Err(AppError::bad("That upload is no longer on the server. Choose the file again."));
+    }
+    if IMPORT_RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return Err(AppError::bad("An import is already running. Wait for it to finish."));
+    }
+    let guard = RunGuard; // frees the "one import at a time" lock when this import ends, even if it panics
+    if b.get("background").and_then(Value::as_bool) == Some(true) && !token.is_empty() {
+        tokio::spawn(async move {
+            let _guard = guard;
+            let res = do_import(&s, &mode, &id, &sheet, &token).await;
+            let done = match res {
+                Ok(Json(result)) => json!({ "pct": 100, "text": "Done.", "done": true, "result": result }),
+                Err(e) => json!({ "pct": null, "text": "Failed", "done": true, "error": error_text(e) }),
+            };
+            if let Ok(mut p) = s.progress.lock() {
+                p.insert(token, done);
+            }
+        });
+        return Ok(Json(json!({ "started": true })));
+    }
+    let _guard = guard;
+    do_import(&s, &mode, &id, &sheet, &token).await
+}
+
+struct RunGuard;
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        IMPORT_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+async fn do_import(s: &AppState, mode: &str, id: &str, sheet: &str, token: &str) -> AppResult<Json<Value>> {
+    let (mode, id, sheet, token) = (mode.to_string(), id.to_string(), sheet.to_string(), token.to_string());
+    let s = s.clone();
     let Some((path, filename)) = s.uploads.lock().unwrap().get(&id).cloned() else { return Err(AppError::bad("That upload is no longer on the server. Choose the file again.")) };
     let sch = s.schema();
     // the bar: reading the file 0-55%, saving the orders 55-90%, the rest (dropdowns, calculated columns, swap) up to 100%
