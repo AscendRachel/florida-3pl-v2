@@ -26,7 +26,8 @@ services:
       MARIADB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in the .env file}
       MARIADB_ROOT_HOST: localhost    # the root account can only be used from inside this container
       TZ: America/New_York
-    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--innodb-buffer-pool-size=256M", "--max-allowed-packet=64M", "--local-infile=0", "--skip-name-resolve"]
+    # Small-memory settings so it runs on a 512 MB server. With 2 GB or more, set DB_BUFFER_POOL=512M (or more) in .env for speed.
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--innodb-buffer-pool-size=${DB_BUFFER_POOL:-64M}", "--innodb-log-file-size=32M", "--innodb-log-buffer-size=4M", "--performance-schema=OFF", "--max-connections=40", "--max-allowed-packet=64M", "--local-infile=0", "--skip-name-resolve"]
     security_opt:
       - no-new-privileges:true
     volumes:
