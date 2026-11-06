@@ -515,6 +515,7 @@ dependencies = [
  "dotenvy",
  "encoding_rs",
  "hex",
+ "hmac",
  "indexmap",
  "pbkdf2",
  "quick-xml",

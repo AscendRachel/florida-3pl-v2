@@ -30,6 +30,8 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(index_page))
         .route("/login", get(login_page))
         .nest_service("/static", ServeDir::new(format!("{web}/static")))
+        .route("/pma-login", get(crate::pma::login))
+        .route("/api/pma-auth", get(crate::pma::check))
         .route("/api/health", get(health))
         .route("/api/build", get(build))
         .route("/api/branding", get(branding))
@@ -251,7 +253,7 @@ async fn logout(State(s): State<AppState>, headers: HeaderMap) -> AppResult<Resp
     if let Some(t) = auth::token_of(&headers) {
         auth::end_session(&s.db, &t).await?;
     }
-    Ok((AppendHeaders([(SET_COOKIE, auth::cookie_value("", is_https(&headers), Some(0)))]), Json(json!({ "ok": true }))).into_response())
+    Ok((AppendHeaders([(SET_COOKIE, auth::cookie_value("", is_https(&headers), Some(0))), (SET_COOKIE, crate::pma::clear_cookie())]), Json(json!({ "ok": true }))).into_response())
 }
 
 async fn me(CurrentUser(u): CurrentUser) -> Json<Value> {

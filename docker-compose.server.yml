@@ -1,12 +1,12 @@
 # For the server (the domain): the Rust app (image from Docker Hub) + MariaDB + phpMyAdmin + Caddy for HTTPS.
-# People open https://DOMAIN (the app) and, from allowed addresses only, https://PMA_DOMAIN (phpMyAdmin): no port numbers.
-# Needs DNS A records for both names pointing to this server, and ports 80 and 443 open on it.
+# People open https://DOMAIN (the app) and https://DOMAIN/phpmyadmin (phpMyAdmin, only for admins who hold a valid JWT: see JWT_SECRET).
+# Needs a DNS A record for DOMAIN pointing to this server, and ports 80 and 443 open on it.
 # Hardened: only Caddy is reachable from outside; the database sits on a private network with no way out to the internet;
 # containers run without extra privileges, the app with a read-only filesystem.
-#   1. copy .env.example to .env, set STRONG passwords, and add DOMAIN, PMA_DOMAIN and PMA_ALLOW (see .env.example)
+#   1. copy .env.example to .env, set STRONG passwords, DOMAIN and JWT_SECRET (see .env.example)
 #   2. docker compose -f docker-compose.server.yml up -d
-# If the server already runs its own Caddy, do not start this one: start only mariadb, app and phpmyadmin, and add both
-# blocks from the Caddyfile to the existing Caddyfile (reverse_proxy to florida-3pl-rust:8765 and florida-3pl-phpmyadmin:80).
+# If the server already runs its own Caddy, do not start this one: start only mariadb, app and phpmyadmin, and add the
+# block from the Caddyfile to the existing Caddyfile (reverse_proxy to florida-3pl-rust:8765 and florida-3pl-phpmyadmin:80).
 # See HARDENING.md for the server itself (firewall, SSH, updates, backups).
 x-logging: &logging
   driver: json-file
@@ -51,6 +51,7 @@ services:
     environment:
       DATABASE_URL: mysql://${DB_USER}:${DB_PASSWORD}@mariadb:3306/${DB_NAME}
       HTTPS_ONLY: "1"             # sign-in cookies are always Secure, browsers are told to use HTTPS only
+      JWT_SECRET: "${JWT_SECRET:?set JWT_SECRET in the .env file (at least 32 random characters, e.g. openssl rand -hex 32)}"   # signs the pass for /phpmyadmin
     expose:
       - "8765"                     # only Caddy can reach it
     read_only: true                # the program cannot change its own files
@@ -70,7 +71,7 @@ services:
       - front                      # lets it be reached by Caddy and reach Google (Drive names, returns sheet)
     logging: *logging
 
-  # phpMyAdmin: not published; reached only through Caddy at https://PMA_DOMAIN, and Caddy lets in only the addresses in PMA_ALLOW.
+  # phpMyAdmin: not published; reached only through Caddy at https://DOMAIN/phpmyadmin, and only with the admin's JWT (see the Caddyfile).
   phpmyadmin:
     image: phpmyadmin:5
     container_name: florida-3pl-phpmyadmin
@@ -80,7 +81,7 @@ services:
         condition: service_healthy
     environment:
       PMA_HOST: mariadb
-      PMA_ABSOLUTE_URI: https://${PMA_DOMAIN:?set PMA_DOMAIN in the .env file, for example db.example.com}/
+      PMA_ABSOLUTE_URI: https://${DOMAIN:?set DOMAIN in the .env file, for example orders.example.com}/phpmyadmin/
       UPLOAD_LIMIT: 256M
     expose:
       - "80"
@@ -104,8 +105,6 @@ services:
       - "443:443/udp"
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in the .env file, for example orders.example.com}
-      PMA_DOMAIN: ${PMA_DOMAIN:?set PMA_DOMAIN in the .env file, for example db.example.com}
-      PMA_ALLOW: "${PMA_ALLOW:?set PMA_ALLOW in the .env file (the addresses allowed to open phpMyAdmin, for example 203.0.113.5 or 203.0.113.0/24)}"
     cap_drop:
       - ALL
     cap_add:

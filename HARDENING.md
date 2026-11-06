@@ -19,7 +19,7 @@ Do the VM part before the domain goes live.
 
 **The containers (`docker-compose.server.yml`)**
 - Only Caddy is reachable from the internet (ports 80 and 443). MariaDB, the app and phpMyAdmin publish no ports.
-- phpMyAdmin is reached only through Caddy at its own address (`PMA_DOMAIN`), over HTTPS, and only from the addresses in `PMA_ALLOW`; everybody else gets 403 before phpMyAdmin is touched. It still asks for the database user and password. Keep `PMA_ALLOW` to your IT head's office/VPN address, never "everyone".
+- phpMyAdmin is reached only through Caddy at `https://DOMAIN/phpmyadmin`, over HTTPS, and only with a JWT (HS256, signed with `JWT_SECRET` from `.env`, valid 8 hours) that the app gives to a signed-in admin at `/pma-login`. Caddy asks the app (`/api/pma-auth`) before every request; no valid JWT means the visitor is sent to the sign-in. The check also confirms the person is still an active admin, so removing an admin closes the door. phpMyAdmin then still asks for the database user and password. Keep `JWT_SECRET` secret (32+ random characters, `openssl rand -hex 32`); the app refuses to open the gate when it is missing or shorter.
 - MariaDB is on a private Docker network with no route to the internet; the root account works only inside its own container.
 - The app runs as a normal user, with a read-only filesystem, all Linux capabilities dropped, `no-new-privileges`, a 1 GB memory limit and a process limit.
 - Caddy handles the HTTPS certificate and renews it by itself; HTTP is redirected to HTTPS.

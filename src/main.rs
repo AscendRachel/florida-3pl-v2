@@ -19,6 +19,7 @@ mod import;
 mod notify;
 mod orders_api;
 mod orders_write;
+mod pma;
 mod returns;
 mod routes;
 mod scan;

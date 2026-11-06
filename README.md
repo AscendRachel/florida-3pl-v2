@@ -85,13 +85,13 @@ Differences from the old app, on purpose:
 
 ## On the server (domain + HTTPS with Caddy)
 
-`docker-compose.server.yml` runs MariaDB, the app (the image `ascendrachel/florida-3pl-v2` from Docker Hub), phpMyAdmin and Caddy. Only Caddy is open to the internet (ports 80 and 443); MariaDB, the app and phpMyAdmin are not published. Caddy serves two addresses:
+`docker-compose.server.yml` runs MariaDB, the app (the image `ascendrachel/florida-3pl-v2` from Docker Hub), phpMyAdmin and Caddy. Only Caddy is open to the internet (ports 80 and 443); MariaDB, the app and phpMyAdmin are not published. Caddy serves one address:
 - `https://DOMAIN`: the app.
-- `https://PMA_DOMAIN`: phpMyAdmin, only for the addresses listed in `PMA_ALLOW`; everybody else gets 403 from Caddy.
+- `https://DOMAIN/phpmyadmin`: phpMyAdmin, only for **admins holding a valid JWT**. The JWT is signed with `JWT_SECRET` from `.env`. An admin gets it by being signed in to the app and opening `https://DOMAIN/pma-login` (opening `/phpmyadmin` sends them there by itself); it lasts 8 hours and stops working at once if the admin is removed. Without it, Caddy never lets the request reach phpMyAdmin. phpMyAdmin then still asks for the database user and password.
 
-1. `.env`: set the passwords and add `DOMAIN`, `PMA_DOMAIN` and `PMA_ALLOW` (see `.env.example`). Both names need a DNS A record pointing to the server.
+1. `.env`: set the passwords, `DOMAIN` and `JWT_SECRET` (`openssl rand -hex 32`; see `.env.example`). `DOMAIN` needs a DNS A record pointing to the server.
 2. `docker compose -f docker-compose.server.yml up -d`
-3. If the server already runs its own Caddy, start only `mariadb`, `app` and `phpmyadmin` and add both blocks from `Caddyfile` to the existing one.
+3. If the server already runs its own Caddy, start only `mariadb`, `app` and `phpmyadmin` and add the block from `Caddyfile` to the existing one.
 
 To build the app from the source instead of pulling the image, replace the `image:` line of `app` with `build: .` and use `up -d --build`.
 
