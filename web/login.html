@@ -43,7 +43,7 @@ fetch("/api/build", { cache: "no-store" }).then((r) => r.json()).then(({ version
   try {
     const s = await (await fetch("/api/setup-needed")).json();
     if (s.setup) {
-      if (!s.allowed) { show("The app isn't set up yet. Open it on the server PC to create the first admin.", "bad"); $("form").hidden = true; return; }
+      if (!s.allowed) { show("The app has no accounts yet. On the server, set ADMIN_USERNAME and ADMIN_PASSWORD in the .env file and restart the app, or run the create-admin command (see the README).", "bad"); $("form").hidden = true; return; }
       setup = true; document.body.dataset.setup = "1";
       $("title").textContent = "Create the admin account";
       $("sub").textContent = "This is the first start. Pick a name, username and password for yourself. You can add the rest of the team afterwards.";
