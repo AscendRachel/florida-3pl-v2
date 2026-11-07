@@ -189,7 +189,18 @@ pub fn label_fits(file_name: &str, customer: &str, label: &str, tracking: &str) 
         false
     };
     let number_ok = has(&plain(label)) || has(&plain(tracking));
-    let name_ok = who.is_empty() || f.contains(&who);
+    // The label maker cuts a long name short (NSA-Mid-South-...-ATTN-Savannah---9300... for "... ATTN Savannah Sabanosh"; "pCar" for "pCard").
+    // So the file also fits when the part of its name before the tracking number (a run of 8 or more digits) is the START of the customer's
+    // name and is not tiny. A different person's name still fails: it is not the start of this customer's name.
+    let name_part: &str = {
+        let digits = f.as_bytes();
+        let cut = (0..digits.len().saturating_sub(7)).find(|&i| digits[i..i + 8].iter().all(u8::is_ascii_digit)).unwrap_or(f.len());
+        &f[..cut]
+    };
+    // (a file whose name lost its first one or two letters, like "mily-Moore" for "Emily Moore", fits too)
+    let cut_at_the_end = name_part.len() >= 12 && who.starts_with(name_part);
+    let cut_at_the_start = name_part.len() >= 6 && who.ends_with(name_part) && who.len() - name_part.len() <= 2;
+    let name_ok = who.is_empty() || f.contains(&who) || cut_at_the_end || cut_at_the_start;
     match (name_ok, number_ok) {
         (true, true) => "",
         (false, false) => "Different customer and number",
@@ -356,4 +367,38 @@ pub async fn admin_month(_a: AdminUser, State(s): State<AppState>, Query(q): Que
     ))
     .await?;
     Ok(Json(json!({ "month": month, "received": received, "shipped": shipped })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::label_fits;
+
+    #[test]
+    fn a_name_cut_short_by_the_label_maker_still_fits() {
+        // the two cases from the Admin tab: "Sabanosh" and the last letter of "pCard" are missing from the file name
+        assert_eq!(label_fits("NSA-Mid-South-MWR-Com-Rec-ATTN-Savannah---9300111043900406218871.pdf", "NSA Mid-South MWR Com Rec ATTN Savannah Sabanosh", "LN-49047", "9300111043900406218871"), "");
+        assert_eq!(label_fits("Denver-Health-Attn-Delane-Gift-Shop-pCar---9334611043900226863048.pdf", "Denver Health Attn Delane Gift Shop pCard", "LN-48981", "9334611043900226863048"), "");
+        // the first letter lost instead
+        assert_eq!(label_fits("mily-Moore---9300111043900414089531.pdf", "Emily Moore", "LN-7", "9300111043900414089531"), "");
+        // but not three or more letters, and not a different name that merely ends the same way
+        assert_eq!(label_fits("ore---9300111043900414089531.pdf", "Emily Moore", "LN-7", "9300111043900414089531"), "Different customer name");
+        assert_eq!(label_fits("Moore---9300111043900414089531.pdf", "Emily Moore", "LN-7", "9300111043900414089531"), "Different customer name");
+    }
+
+    #[test]
+    fn the_normal_cases_are_unchanged() {
+        assert_eq!(label_fits("Heather-Taglieri---9400136106196324808946.pdf", "Heather Taglieri", "LN-231", "9400136106196324808946"), "");
+        assert_eq!(label_fits("LN-296Amy Wilson.pdf", "Amy Wilson", "LN-296", ""), "");
+        assert_eq!(label_fits("Heather-Taglieri---9400136106196324808946.pdf", "Amy Wilson", "LN-231", "9400136106196324808946"), "Different customer name");
+        assert_eq!(label_fits("Heather-Taglieri---9400136106196324808946.pdf", "Heather Taglieri", "LN-231", "9999999999999999999999"), "No matching label or tracking number");
+        assert_eq!(label_fits("Heather-Taglieri---9400136106196324808946.pdf", "Amy Wilson", "LN-5", "123"), "Different customer and number");
+    }
+
+    #[test]
+    fn a_different_person_or_a_tiny_prefix_does_not_pass() {
+        // same company, a different person: the file's name is not the start of this customer's name
+        assert_eq!(label_fits("NSA-Mid-South-MWR-Com-Rec-ATTN-Jordan---9300111043900406218871.pdf", "NSA Mid-South MWR Com Rec ATTN Savannah Sabanosh", "LN-1", "9300111043900406218871"), "Different customer name");
+        // a very short name part is not enough to call it the same customer
+        assert_eq!(label_fits("Amy---9300111043900406218871.pdf", "Amy Wilson", "LN-1", "9300111043900406218871"), "Different customer name");
+    }
 }
