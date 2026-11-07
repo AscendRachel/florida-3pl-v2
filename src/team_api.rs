@@ -1,6 +1,7 @@
 //! The Work Log chat, the app's branding (name, colour, logo), the Drive file names and the Admin tab.
 
 use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 
 use axum::extract::{Query, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
@@ -165,10 +166,11 @@ fn plain(s: &str) -> String {
 /// number (LN-296Amy Wilson.pdf). It fits the order when the name holds the customer AND one of the two numbers; a number must stand
 /// alone (LN-29 is not in LN-296). Returns "" when it fits, otherwise what is wrong.
 pub fn label_fits(file_name: &str, customer: &str, label: &str, tracking: &str) -> &'static str {
-    let ext = Regex::new(r"(?i)\.(pdf|png|jpe?g)\s*$").unwrap();
-    let stem = ext.replace(file_name, "").to_string();
-    let copy = Regex::new(r"\s*\(\d+\)\s*$").unwrap(); // a copy that Drive named "... (1).pdf" is the same file name
-    let f = plain(&copy.replace(&stem, ""));
+    // built once: this runs for every label link in the sheet (tens of thousands of times)
+    static EXT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\.(pdf|png|jpe?g)\s*$").unwrap());
+    static COPY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*\(\d+\)\s*$").unwrap()); // a copy that Drive named "... (1).pdf" is the same file name
+    let stem = EXT.replace(file_name, "").to_string();
+    let f = plain(&COPY.replace(&stem, ""));
     let who = plain(customer);
     let has = |n: &str| {
         if n.is_empty() {
@@ -199,6 +201,25 @@ pub fn label_fits(file_name: &str, customer: &str, label: &str, tracking: &str) 
 /// Check every Shipping Label Link against its order by the file's name. The names come from Google a few at a time in the background
 /// (not shipped orders first, newest first), so `checked` grows until it reaches `total`.
 async fn label_audit(s: &AppState) -> AppResult<Value> {
+    // The result only changes when the data changes or more file names arrive from Google, so it is kept (at most a minute) and
+    // reused by every tab and every person. What Google is doing right now (`reading`) is always read fresh.
+    let key = (s.version_now(), sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM drive_names").fetch_one(&s.db).await?);
+    if let Some((k, at, v)) = AUDIT_CACHE.lock().unwrap().as_ref() {
+        if *k == key && at.elapsed().as_secs() < 60 {
+            let mut v = v.clone();
+            v["reading"] = s.drive.state();
+            return Ok(v);
+        }
+    }
+    let fresh = label_audit_uncached(s).await?;
+    *AUDIT_CACHE.lock().unwrap() = Some((key, std::time::Instant::now(), fresh.clone()));
+    Ok(fresh)
+}
+
+static AUDIT_CACHE: LazyLock<Mutex<Option<((u64, i64), std::time::Instant, Value)>>> = LazyLock::new(|| Mutex::new(None));
+static COUNTS_CACHE: LazyLock<Mutex<Option<(u64, std::time::Instant, Vec<i64>)>>> = LazyLock::new(|| Mutex::new(None));
+
+async fn label_audit_uncached(s: &AppState) -> AppResult<Value> {
     let sch = s.schema();
     let c = |h: &str| sch.c(h);
     let sql = format!(
@@ -251,21 +272,39 @@ async fn n(s: &AppState, sql: &str) -> AppResult<i64> {
 pub async fn admin_cards(_a: AdminUser, State(s): State<AppState>) -> AppResult<Json<Value>> {
     let sch = s.schema();
     let c = |h: &str| sch.c(h);
-    let has = format!("trim({}) <> ''", c("Store Order No."));
     let enc = |h: &str| h.replace(' ', "%20");
     let mut out = vec![];
-    for (key, label) in [("Product Image Link", "Missing Product Image Link"), ("Brand", "Missing Brand")] {
-        let count = n(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE {has} AND trim({}) = ''", c(key))).await?;
-        out.push(json!({ "key": key, "label": label, "n": count, "note": "orders with an empty cell", "link": format!("#orders?blank={}", enc(key)) }));
+    // The five simple counts in ONE pass over the orders (they used to be five passes), and kept until the data changes (at most a
+    // minute), so opening the tab in several places does not repeat the work.
+    // order: no image, no brand, to void, no label link, return not refunded, then the two duplicate counts
+    let cached = COUNTS_CACHE.lock().unwrap().as_ref().filter(|(v, at, _)| *v == s.version_now() && at.elapsed().as_secs() < 60).map(|(_, _, c)| c.clone());
+    let counts = match cached {
+        Some(c) => c,
+        None => {
+            let has = format!("trim({}) <> ''", c("Store Order No."));
+            let sql = format!(
+                "SELECT CAST(COALESCE(SUM({has} AND trim({img}) = ''), 0) AS SIGNED), CAST(COALESCE(SUM({has} AND trim({brand}) = ''), 0) AS SIGNED), \
+                 CAST(COALESCE(SUM(upper(trim({tv})) = 'TRUE' AND upper(trim({lv})) <> 'TRUE'), 0) AS SIGNED), CAST(COALESCE(SUM({has} AND trim({link}) = ''), 0) AS SIGNED), \
+                 CAST(COALESCE(SUM(upper(trim({sa})) = 'TRUE' AND lower(trim({st})) <> 'refunded'), 0) AS SIGNED) FROM orders_text",
+                img = c("Product Image Link"), brand = c("Brand"), tv = c("To Void"), lv = c("Label Voided"), link = c("Shipping Label Link"), sa = c("Shipped to Amazon"), st = c("Source Order Status")
+            );
+            let row = sqlx::query(&sql).fetch_one(&s.db).await?;
+            let mut v: Vec<i64> = (0..5).map(|i| row.try_get_unchecked::<i64, _>(i).unwrap_or(0)).collect();
+            let dup = |col: String| format!("SELECT COALESCE(SUM(n), 0) FROM (SELECT COUNT(*) n FROM orders_text WHERE trim({col}) <> '' GROUP BY lower(trim({col})) HAVING COUNT(*) > 1) d");
+            v.push(n(&s, &dup(c("Tracking Number To Customer"))).await?);
+            v.push(n(&s, &dup(c("Shipping Label Link"))).await?);
+            *COUNTS_CACHE.lock().unwrap() = Some((s.version_now(), std::time::Instant::now(), v.clone()));
+            v
+        }
+    };
+    for (i, (key, label)) in [("Product Image Link", "Missing Product Image Link"), ("Brand", "Missing Brand")].into_iter().enumerate() {
+        out.push(json!({ "key": key, "label": label, "n": counts[i], "note": "orders with an empty cell", "link": format!("#orders?blank={}", enc(key)) }));
     }
-    let count = n(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE upper(trim({})) = 'TRUE' AND upper(trim({})) <> 'TRUE'", c("To Void"), c("Label Voided"))).await?;
-    out.push(json!({ "key": "tovoid", "label": "To Void, Label Not Yet Voided", "n": count, "note": "To Void is checked, Label Voided is not", "link": "#orders?show=tovoid" }));
-    let dup = |col: String| format!("SELECT COALESCE(SUM(n), 0) FROM (SELECT COUNT(*) n FROM orders_text WHERE trim({col}) <> '' GROUP BY lower(trim({col})) HAVING COUNT(*) > 1) d");
-    out.push(json!({ "key": "dupusps", "label": "USPS Tracking Duplicate", "n": n(&s, &dup(c("Tracking Number To Customer"))).await?, "note": "rows sharing a Tracking Number To Customer", "link": "#orders?show=dupusps" }));
-    out.push(json!({ "key": "duplabel", "label": "Label Link Duplicate", "n": n(&s, &dup(c("Shipping Label Link"))).await?, "note": "rows sharing a Shipping Label Link", "link": "#orders?show=duplabel" }));
-    let count = n(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE {has} AND trim({}) = ''", c("Shipping Label Link"))).await?;
-    out.push(json!({ "key": "nolabel", "label": "Label Link Empty", "n": count, "note": "orders with no Shipping Label Link", "link": "#orders?blank=Shipping%20Label%20Link" }));
-    let pending = n(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE upper(trim({})) = 'TRUE' AND lower(trim({})) <> 'refunded'", c("Shipped to Amazon"), c("Source Order Status"))).await?;
+    out.push(json!({ "key": "tovoid", "label": "To Void, Label Not Yet Voided", "n": counts[2], "note": "To Void is checked, Label Voided is not", "link": "#orders?show=tovoid" }));
+    out.push(json!({ "key": "dupusps", "label": "USPS Tracking Duplicate", "n": counts[5], "note": "rows sharing a Tracking Number To Customer", "link": "#orders?show=dupusps" }));
+    out.push(json!({ "key": "duplabel", "label": "Label Link Duplicate", "n": counts[6], "note": "rows sharing a Shipping Label Link", "link": "#orders?show=duplabel" }));
+    out.push(json!({ "key": "nolabel", "label": "Label Link Empty", "n": counts[3], "note": "orders with no Shipping Label Link", "link": "#orders?blank=Shipping%20Label%20Link" }));
+    let pending = counts[4];
     let a = label_audit(&s).await?;
     let rd = &a["reading"];
     let mut note = format!("checked {} of {} links", fmt(a["checked"].as_i64().unwrap_or(0)), fmt(a["total"].as_i64().unwrap_or(0)));
