@@ -51,7 +51,7 @@ export async function mount(el) {
       <div class="tablewrap" style="max-height:none;margin-top:10px"><table class="adm-table"><tbody>
         ${row("Total Deliveries Arrived", rep.arrived, "")}${shipped}${pend}
       </tbody></table></div>
-      <p class="hint" style="margin-top:8px"><b>Arrived:</b> packages with this Delivery Date that are Delivered. <b>Orders Shipped:</b> packages shipped to the customer on this day, by their Delivery Date. <b>Pending:</b> Delivered packages with this or an earlier Delivery Date that were not shipped by the end of this day.</p></div>`;
+      <p class="hint" style="margin-top:8px"><b>Arrived:</b> packages with this Delivery Date that are Delivered. <b>Orders Shipped:</b> packages shipped to the customer on this day, by their Delivery Date. <b>Pending:</b> Delivered packages with this or an earlier Delivery Date that were not shipped by the end of this day and are still waiting in the warehouse (tracking status Preshipment; returns to Amazon, stock and not-received packages are left out).</p></div>`;
   };
 
   const draw = () => {

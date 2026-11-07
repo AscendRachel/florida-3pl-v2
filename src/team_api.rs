@@ -380,6 +380,9 @@ pub async fn admin_daily(_a: AdminUser, State(s): State<AppState>, Query(q): Que
     let sch = s.schema();
     let c = |h: &str| sch.c(h);
     let (dt, st, sc, sb) = (c("Delivery Date"), c("Source Order Status"), c("SHIPPED TO  CUSTOMER DATE"), c("Shipped to Customer"));
+    // what is still waiting in the warehouse (the Dashboard's "Total Packages in Warehouse" rule): not returned to Amazon, not from stock,
+    // not marked not received, and the tracking status is still Preshipment (a return to Amazon / sender / store is not a package to ship)
+    let waiting = format!("{} <> 'TRUE' AND {} <> 'TRUE' AND {} <> 'TRUE' AND {} = 'Preshipment'", c("Shipped to Amazon"), c("Stock"), c("Package Not Received"), c("Tracking Status"));
     let by_date = |sql: String, args: Vec<String>| {
         let s = s.clone();
         async move {
@@ -400,7 +403,7 @@ pub async fn admin_daily(_a: AdminUser, State(s): State<AppState>, Query(q): Que
     let shipped = by_date(format!("SELECT substr({dt}, 1, 10), COUNT(*) FROM orders_text WHERE substr({sc}, 1, 10) = ? GROUP BY 1 ORDER BY 1"), vec![day.clone()]).await?;
     let pending = by_date(
         format!(
-            "SELECT substr({dt}, 1, 10), COUNT(*) FROM orders_text WHERE {st} = 'Delivered' AND substr({dt}, 1, 10) <> '' AND substr({dt}, 1, 10) <= ? \
+            "SELECT substr({dt}, 1, 10), COUNT(*) FROM orders_text WHERE {st} = 'Delivered' AND substr({dt}, 1, 10) <> '' AND substr({dt}, 1, 10) <= ? AND {waiting} \
              AND NOT ((upper(trim({sb})) = 'TRUE' OR trim({sc}) <> '') AND (trim({sc}) = '' OR substr({sc}, 1, 10) <= ?)) GROUP BY 1 ORDER BY 1"
         ),
         vec![day.clone(), day.clone()],
