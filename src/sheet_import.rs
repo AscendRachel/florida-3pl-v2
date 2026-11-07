@@ -498,7 +498,7 @@ async fn do_import(s: &AppState, mode: &str, id: &str, sheet: &str, token: &str)
         attach_custom_dropdowns(&mut tx, &sch).await?;
     } else {
         let rn_of: HashMap<usize, u64> = if mode == "replace" {
-            for t in ["order_custom_values", "dropdown_cells", "dropdown_lists", "order_edits", "edit_log", "scans", "ship_events", "boxes", "trash_rows", "orders"] {
+            for t in ["order_custom_values", "dropdown_cells", "dropdown_lists", "order_edits", "edit_log", "scans", "ship_events", "boxes", "trash_rows", "label_approvals", "orders"] {
                 sqlx::query(&format!("DELETE FROM `{t}`")).execute(&mut *tx).await?;
             }
             parsed.rows.iter().map(|(n, _)| (*n, *n as u64)).collect()

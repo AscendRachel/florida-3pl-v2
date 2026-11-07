@@ -189,18 +189,9 @@ pub fn label_fits(file_name: &str, customer: &str, label: &str, tracking: &str) 
         false
     };
     let number_ok = has(&plain(label)) || has(&plain(tracking));
-    // The label maker cuts a long name short (NSA-Mid-South-...-ATTN-Savannah---9300... for "... ATTN Savannah Sabanosh"; "pCar" for "pCard").
-    // So the file also fits when the part of its name before the tracking number (a run of 8 or more digits) is the START of the customer's
-    // name and is not tiny. A different person's name still fails: it is not the start of this customer's name.
-    let name_part: &str = {
-        let digits = f.as_bytes();
-        let cut = (0..digits.len().saturating_sub(7)).find(|&i| digits[i..i + 8].iter().all(u8::is_ascii_digit)).unwrap_or(f.len());
-        &f[..cut]
-    };
-    // (a file whose name lost its first one or two letters, like "mily-Moore" for "Emily Moore", fits too)
-    let cut_at_the_end = name_part.len() >= 12 && who.starts_with(name_part);
-    let cut_at_the_start = name_part.len() >= 6 && who.ends_with(name_part) && who.len() - name_part.len() <= 2;
-    let name_ok = who.is_empty() || f.contains(&who) || cut_at_the_end || cut_at_the_start;
+    // Strict on purpose: a name the label maker cut short (...ATTN-Savannah for "... ATTN Savannah Sabanosh") is flagged, and a person
+    // decides with the Approve button on the Admin tab.
+    let name_ok = who.is_empty() || f.contains(&who);
     match (name_ok, number_ok) {
         (true, true) => "",
         (false, false) => "Different customer and number",
@@ -241,7 +232,14 @@ async fn label_audit_uncached(s: &AppState) -> AppResult<Value> {
     let known = drive::all_names(&s.db).await?;
     let id_re = Regex::new(r"(?:/d/|[?&]id=)([-\w]{25,})").unwrap();
     let now = clock::now();
-    let (mut todo, mut mismatches, mut checked, mut unread, mut with_id) = (vec![], vec![], 0, 0, 0);
+    // links a person already looked at and approved: (row, file) -> who and when
+    let approvals: HashMap<(u64, String), (String, String)> = sqlx::query("SELECT rn, CAST(file_id AS CHAR), CAST(approved_by AS CHAR), approved_at FROM label_approvals")
+        .fetch_all(&s.db)
+        .await?
+        .iter()
+        .map(|r| ((r.try_get::<u64, _>(0).unwrap_or(0), r.try_get_unchecked::<String, _>(1).unwrap_or_default()), (r.try_get_unchecked::<String, _>(2).unwrap_or_default(), r.try_get::<NaiveDateTime, _>(3).map(|d| d.format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default())))
+        .collect();
+    let (mut todo, mut mismatches, mut approved, mut checked, mut unread, mut with_id) = (vec![], vec![], vec![], 0, 0, 0);
     for r in &rows {
         let t = |i: usize| r.try_get_unchecked::<String, _>(i).unwrap_or_default();
         let (label, customer, tracking, link) = (t(1), t(2), t(3), t(4));
@@ -260,7 +258,12 @@ async fn label_audit_uncached(s: &AppState) -> AppResult<Value> {
                 checked += 1;
                 let why = label_fits(name, &customer, &label, &tracking);
                 if !why.is_empty() {
-                    mismatches.push(json!({ "rn": r.try_get::<u64, _>(0).unwrap_or(0), "label": label, "customer": customer, "tracking": tracking, "file": name, "why": why }));
+                    let rn = r.try_get::<u64, _>(0).unwrap_or(0);
+                    let item = json!({ "rn": rn, "file_id": fid, "label": label, "customer": customer, "tracking": tracking, "file": name, "why": why });
+                    match approvals.get(&(rn, fid.clone())) {
+                        Some((by, at)) => approved.push(json!({ "rn": rn, "file_id": fid, "label": label, "customer": customer, "tracking": tracking, "file": name, "why": why, "by": by, "at": at })),
+                        None => mismatches.push(item),
+                    }
                 }
             }
         }
@@ -268,11 +271,31 @@ async fn label_audit_uncached(s: &AppState) -> AppResult<Value> {
     if !todo.is_empty() {
         drive::crawl(&s.drive, &s.db, todo);
     }
-    Ok(json!({ "checked": checked, "unread": unread, "total": with_id, "mismatches": mismatches, "reading": s.drive.state() }))
+    Ok(json!({ "checked": checked, "unread": unread, "total": with_id, "mismatches": mismatches, "approved": approved, "reading": s.drive.state() }))
 }
 
 pub async fn admin_labels(_a: AdminUser, State(s): State<AppState>) -> AppResult<Json<Value>> {
     Ok(Json(label_audit(&s).await?))
+}
+
+/// An admin looked at a flagged label link and approves it (`approve` true) or takes the approval back (false). It is tied to the order row
+/// and the Drive file, so a link changed to another file is checked again.
+pub async fn label_approve(AdminUser(me): AdminUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+    let rn = b.get("rn").and_then(Value::as_u64).ok_or_else(|| AppError::bad("Which order?"))?;
+    let file_id = b.get("file_id").and_then(Value::as_str).unwrap_or("");
+    if file_id.len() < 10 || file_id.len() > 100 || !file_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err(AppError::bad("Which label file?"));
+    }
+    if b.get("approve").and_then(Value::as_bool).unwrap_or(true) {
+        if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM orders WHERE rn = ?").bind(rn).fetch_one(&s.db).await? == 0 {
+            return Err(AppError::bad("That order is no longer there."));
+        }
+        sqlx::query("REPLACE INTO label_approvals (rn, file_id, approved_by, approved_at) VALUES (?,?,?,?)").bind(rn).bind(file_id).bind(&me.name).bind(clock::now()).execute(&s.db).await?;
+    } else {
+        sqlx::query("DELETE FROM label_approvals WHERE rn = ? AND file_id = ?").bind(rn).bind(file_id).execute(&s.db).await?;
+    }
+    s.bump(); // the Admin cards and the list look again
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn n(s: &AppState, sql: &str) -> AppResult<i64> {
@@ -374,15 +397,11 @@ mod tests {
     use super::label_fits;
 
     #[test]
-    fn a_name_cut_short_by_the_label_maker_still_fits() {
-        // the two cases from the Admin tab: "Sabanosh" and the last letter of "pCard" are missing from the file name
-        assert_eq!(label_fits("NSA-Mid-South-MWR-Com-Rec-ATTN-Savannah---9300111043900406218871.pdf", "NSA Mid-South MWR Com Rec ATTN Savannah Sabanosh", "LN-49047", "9300111043900406218871"), "");
-        assert_eq!(label_fits("Denver-Health-Attn-Delane-Gift-Shop-pCar---9334611043900226863048.pdf", "Denver Health Attn Delane Gift Shop pCard", "LN-48981", "9334611043900226863048"), "");
-        // the first letter lost instead
-        assert_eq!(label_fits("mily-Moore---9300111043900414089531.pdf", "Emily Moore", "LN-7", "9300111043900414089531"), "");
-        // but not three or more letters, and not a different name that merely ends the same way
-        assert_eq!(label_fits("ore---9300111043900414089531.pdf", "Emily Moore", "LN-7", "9300111043900414089531"), "Different customer name");
-        assert_eq!(label_fits("Moore---9300111043900414089531.pdf", "Emily Moore", "LN-7", "9300111043900414089531"), "Different customer name");
+    fn a_name_cut_short_by_the_label_maker_is_flagged_for_a_person_to_approve() {
+        // "Sabanosh", the last letter of "pCard" and the first letter of "Emily" are missing from the file names
+        assert_eq!(label_fits("NSA-Mid-South-MWR-Com-Rec-ATTN-Savannah---9300111043900406218871.pdf", "NSA Mid-South MWR Com Rec ATTN Savannah Sabanosh", "LN-49047", "9300111043900406218871"), "Different customer name");
+        assert_eq!(label_fits("Denver-Health-Attn-Delane-Gift-Shop-pCar---9334611043900226863048.pdf", "Denver Health Attn Delane Gift Shop pCard", "LN-48981", "9334611043900226863048"), "Different customer name");
+        assert_eq!(label_fits("mily-Moore---9300111043900414089531.pdf", "Emily Moore", "LN-7", "9300111043900414089531"), "Different customer name");
     }
 
     #[test]
@@ -395,10 +414,8 @@ mod tests {
     }
 
     #[test]
-    fn a_different_person_or_a_tiny_prefix_does_not_pass() {
-        // same company, a different person: the file's name is not the start of this customer's name
+    fn a_different_person_is_flagged() {
         assert_eq!(label_fits("NSA-Mid-South-MWR-Com-Rec-ATTN-Jordan---9300111043900406218871.pdf", "NSA Mid-South MWR Com Rec ATTN Savannah Sabanosh", "LN-1", "9300111043900406218871"), "Different customer name");
-        // a very short name part is not enough to call it the same customer
         assert_eq!(label_fits("Amy---9300111043900406218871.pdf", "Amy Wilson", "LN-1", "9300111043900406218871"), "Different customer name");
     }
 }

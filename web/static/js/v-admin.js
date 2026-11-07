@@ -11,13 +11,21 @@ export async function mount(el) {
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
   let cards = [], panel = "", labels = null; // panel: the card whose list is open under the cards
+  let showApproved = false; // the "approved" part of the label list is open
+  let lastSig = "";         // what was last drawn; the page is only redrawn when something in it changed
   let received = {}, shipped = {}; // day (YYYY-MM-DD) -> packages received / shipped to the customer
 
   // Pending = packages received - shipped to the customer (of that same day's packages)
   const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
   const pending = (r = 0, s = 0) => (r || s ? fmt(r - s) : "–");
 
+  // what the page shows, as one text: if it is the same as the last time, nothing needs to be redrawn
+  const signature = () => JSON.stringify([year, month, received, shipped, cards, panel, showApproved, labels && [labels.mismatches, labels.approved, labels.checked, labels.unread, labels.total, labels.reading]]);
+
   const draw = () => {
+    // a redraw rebuilds the page, which would throw the list's scroll position (and the page's) back to the top: keep both
+    const wrap = el.querySelector("#labelsWrap"), listTop = wrap ? wrap.scrollTop : 0, pageTop = window.scrollY;
+    lastSig = signature();
     const count = new Date(year, month + 1, 0).getDate();
     const rows = [];
     for (let d = 1; d <= count; d++) {
@@ -39,6 +47,9 @@ export async function mount(el) {
         <div class="tablewrap" style="max-height:none"><table class="adm-table"><thead><tr><th>Date</th>${COLUMNS.map((c) => `<th class="num">${esc(c)}</th>`).join("")}</tr></thead>
           <tbody>${rows.join("")}</tbody>
           <tfoot><tr><td><b>Total</b></td><td class="num"><b>${fmt(sum(received))}</b></td><td class="num"><b>${fmt(sum(shipped))}</b></td><td class="num"><b>${pending(sum(received), sum(shipped))}</b></td></tr></tfoot></table></div></div>`;
+    const wrap2 = el.querySelector("#labelsWrap");
+    if (wrap2) wrap2.scrollTop = listTop;
+    if (window.scrollY !== pageTop) window.scrollTo(0, pageTop);
   };
 
   // the label links whose file name does not fit the order: Label Number / Tracking Number + Customer Name
@@ -46,10 +57,26 @@ export async function mount(el) {
     if (!labels) return `<div class="panel"><span class="muted">Loading…</span></div>`;
     const rows = labels.mismatches.slice(0, 500);
     return `<div class="panel"><div class="btnrow" style="justify-content:space-between;align-items:center"><b>Label links that do not fit the order</b><button class="btn small" id="closePanel">Close</button></div>
-      <p class="muted" style="margin:6px 0 10px">A label file is named Customer name + tracking number, or label number + Customer name. These files have neither the right customer nor the right number. Checked ${fmt(labels.checked)} of ${fmt(labels.total)} links so far${labels.unread ? `; ${fmt(labels.unread)} could not be read (private or deleted)` : ""}. Google is read a few files at a time in the background, so this list grows until every link is checked.</p>
-      ${rows.length ? `<div class="tablewrap" style="max-height:420px"><table><thead><tr><th>Label</th><th>Customer</th><th>Tracking to customer</th><th>File name</th><th>Problem</th></tr></thead><tbody>
-        ${rows.map((m) => `<tr><td><a href="#orders?${new URLSearchParams({ q: m.label, row: String(m.rn), field: "Shipping Label Link", t: String(Date.now()) })}">${esc(m.label)}</a></td><td>${esc(m.customer)}</td><td class="mono">${esc(m.tracking)}</td><td class="clip" title="${esc(m.file)}">${esc(m.file)}</td><td>${esc(m.why)}</td></tr>`).join("")}</tbody></table></div>${labels.mismatches.length > rows.length ? `<p class="hint">Showing the first ${rows.length} of ${fmt(labels.mismatches.length)}.</p>` : ""}` : `<p>No mismatches among the links checked so far.</p>`}</div>`;
+      <p class="muted" style="margin:6px 0 10px">A label file is named Customer name + tracking number, or label number + Customer name. These files do not hold the whole customer name, or the label / tracking number (a name the label maker cut short is flagged too). Open the order and check the file. If it is the right label, click <b>Approve</b>: it leaves this list and the card count. Checked ${fmt(labels.checked)} of ${fmt(labels.total)} links so far${labels.unread ? `; ${fmt(labels.unread)} could not be read (private or deleted)` : ""}. Google is read a few files at a time in the background, so this list grows until every link is checked.</p>
+      ${rows.length ? `<div class="tablewrap" id="labelsWrap" style="max-height:420px"><table><thead><tr><th>Label</th><th>Customer</th><th>Tracking to customer</th><th>File name</th><th>Problem</th><th></th></tr></thead><tbody>
+        ${rows.map((m) => `<tr><td><a href="#orders?${new URLSearchParams({ q: m.label, row: String(m.rn), field: "Shipping Label Link", t: String(Date.now()) })}">${esc(m.label)}</a></td><td>${esc(m.customer)}</td><td class="mono">${esc(m.tracking)}</td><td class="clip" title="${esc(m.file)}">${esc(m.file)}</td><td>${esc(m.why)}</td><td><button class="btn small" data-approve="${m.rn}|${esc(m.file_id)}" title="I checked this label: it is the right one">Approve</button></td></tr>`).join("")}</tbody></table></div>${labels.mismatches.length > rows.length ? `<p class="hint">Showing the first ${rows.length} of ${fmt(labels.mismatches.length)}.</p>` : ""}` : `<p>No mismatches among the links checked so far.</p>`}
+      ${approvedPart()}</div>`;
   };
+  // the ones somebody approved: kept apart, so a wrong click can be taken back
+  const approvedPart = () => {
+    const list = labels.approved || [];
+    if (!list.length) return "";
+    return `<div style="margin-top:12px"><button class="btn small" id="toggleApproved">${showApproved ? "Hide" : "Show"} approved (${fmt(list.length)})</button>
+      ${showApproved ? `<div class="tablewrap" style="max-height:260px;margin-top:8px"><table><thead><tr><th>Label</th><th>Customer</th><th>File name</th><th>Approved by</th><th></th></tr></thead><tbody>
+        ${list.map((m) => `<tr><td>${esc(m.label)}</td><td>${esc(m.customer)}</td><td class="clip" title="${esc(m.file)}">${esc(m.file)}</td><td>${esc(m.by)} <span class="muted">${esc(m.at)}</span></td><td><button class="btn small" data-undo="${m.rn}|${esc(m.file_id)}">Undo</button></td></tr>`).join("")}</tbody></table></div>` : ""}</div>`;
+  };
+  async function setApproval(rn, fid, yes) {
+    try {
+      await api("/api/admin/labels/approve", { rn, file_id: fid, approve: yes });
+      const [l, c] = await Promise.all([api("/api/admin/labels"), api("/api/admin/cards")]);
+      labels = l; cards = c.cards; draw();
+    } catch (e) { toast(e.message, "bad"); draw(); }
+  }
   async function loadLabels() { try { labels = await api("/api/admin/labels"); draw(); } catch (e) { toast(e.message, "bad"); } }
 
   let seq = 0;
@@ -74,6 +101,8 @@ export async function mount(el) {
     if (card) { e.preventDefault(); panel = panel === card.dataset.panel ? "" : card.dataset.panel; labels = null; draw(); if (panel === "labels") loadLabels(); return; }
     const b = e.target.closest("button");
     if (!b) return;
+    if (b.dataset.approve || b.dataset.undo) { const [rn, fid] = (b.dataset.approve || b.dataset.undo).split("|"); b.disabled = true; setApproval(+rn, fid, !!b.dataset.approve); return; }
+    if (b.id === "toggleApproved") { showApproved = !showApproved; draw(); return; }
     if (b.id === "closePanel") { panel = ""; draw(); return; }
     if (b.id === "prev") go(-1);
     else if (b.id === "next") go(1);
@@ -94,7 +123,7 @@ export async function mount(el) {
       const [r, c] = await Promise.all([api("/api/admin/month?month=" + `${year}-${String(month + 1).padStart(2, "0")}`), api("/api/admin/cards")]);
       received = r.received; shipped = r.shipped; cards = c.cards;
       if (panel === "labels") labels = await api("/api/admin/labels");
-      draw();
+      if (signature() !== lastSig) draw(); // nothing changed on the page: leave it alone (no jump to the top)
     } catch { /* offline for a moment */ }
   }, 3000);
 }

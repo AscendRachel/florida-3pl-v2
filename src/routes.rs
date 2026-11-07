@@ -64,6 +64,7 @@ pub fn router(state: AppState) -> Router {
         .route("/branding/logo", get(crate::team_api::branding_logo))
         .route("/api/drive/names", post(crate::team_api::drive_names))
         .route("/api/admin/labels", get(crate::team_api::admin_labels))
+        .route("/api/admin/labels/approve", post(crate::team_api::label_approve))
         .route("/api/admin/cards", get(crate::team_api::admin_cards))
         .route("/api/admin/month", get(crate::team_api::admin_month))
         .route("/api/materials", get(crate::returns::materials_get))
