@@ -80,9 +80,7 @@ a, b = both("/api/chat")
 same("chat today (empty)", {"items": a["items"]}, {"items": b["items"]})
 a, b = both("/api/worklog")
 same("worklog", {k: a[k] for k in ("items", "total", "people")}, {k: b[k] for k in ("items", "total", "people")})
-for m in ("2026-11", "2026-10", "2026-09"):
-    a, b = both(f"/api/admin/month?month={m}")
-    same(f"admin month {m}", a, b)
+# (the Admin tab's month table is gone: it is now the 3PL Daily Update, which v1 does not have)
 a, b = both("/api/branding")
 same("branding", a, b)
 

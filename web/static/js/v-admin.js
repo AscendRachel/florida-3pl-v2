@@ -1,52 +1,73 @@
-// Admin (admins only): a month table with one row per day. The three columns are filled in once their conditions are decided.
+// Admin (admins only): the things to fix in All Orders, and the 3PL Daily Update for the chosen day.
 import { api, brand, esc, fmt, toast } from "./util.js";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const COLUMNS = ["Package Received", "Shipped to Customer", "Pending"];
+
+// "2026-11-04" -> "November 4"
+const longDate = (iso) => { const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(iso || ""); return m ? `${MONTHS[+m[2] - 1]} ${+m[3]}` : "No delivery date"; };
+const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 export async function mount(el) {
-  const now = new Date();
-  let year = now.getFullYear(), month = now.getMonth(); // month: 0-11
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const now = new Date(), today = isoOf(now);
+  let day = today; // the day of the Daily Update
 
   let cards = [], panel = "", labels = null; // panel: the card whose list is open under the cards
   let showApproved = false; // the "approved" part of the label list is open
   let lastSig = "";         // what was last drawn; the page is only redrawn when something in it changed
-  let received = {}, shipped = {}; // day (YYYY-MM-DD) -> packages received / shipped to the customer
-
-  // Pending = packages received - shipped to the customer (of that same day's packages)
-  const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
-  const pending = (r = 0, s = 0) => (r || s ? fmt(r - s) : "–");
+  let showOlder = false;    // the older pending packages are listed day by day
+  let rep = null;          // the Daily Update of `day`: { arrived, shipped: [{date, n}], pending: [{date, n}] }
 
   // what the page shows, as one text: if it is the same as the last time, nothing needs to be redrawn
-  const signature = () => JSON.stringify([year, month, received, shipped, cards, panel, showApproved, labels && [labels.mismatches, labels.approved, labels.checked, labels.unread, labels.total, labels.reading]]);
+  const signature = () => JSON.stringify([day, rep, cards, panel, showApproved, showOlder, labels && [labels.mismatches, labels.approved, labels.checked, labels.unread, labels.total, labels.reading]]);
+
+  // Pending is listed day by day for the last 2 weeks of Delivery Dates; the older ones are one line (they can be opened)
+  const KEEP_DAYS = 14;
+  const split = () => {
+    const [y, m, d] = day.split("-").map(Number), cutoff = isoOf(new Date(y, m - 1, d - KEEP_DAYS));
+    const recent = rep.pending.filter((r) => r.date >= cutoff), older = rep.pending.filter((r) => r.date < cutoff);
+    return { cutoff, recent, older, olderN: older.reduce((a, r) => a + r.n, 0) };
+  };
+  // the report as plain text, ready to paste into a message
+  const reportText = () => {
+    if (!rep) return "";
+    const p = split();
+    const lines = ["3PL Daily Update", longDate(day), `Total Deliveries Arrived: ${rep.arrived}`];
+    if (rep.shipped.length) rep.shipped.forEach((r) => lines.push(`Orders Shipped: ${r.n} (${longDate(r.date)})`)); else lines.push("Orders Shipped: 0");
+    p.recent.forEach((r) => lines.push(`Pending: ${r.n} (${longDate(r.date)})`));
+    if (p.olderN) lines.push(`Pending: ${p.olderN} (before ${longDate(p.cutoff)})`);
+    if (!p.recent.length && !p.olderN) lines.push("Pending: 0");
+    return lines.join("\n");
+  };
+  const reportPanel = () => {
+    if (!rep) return `<div class="panel"><span class="muted">Loading…</span></div>`;
+    const p = split();
+    const row = (label, n, date) => `<tr><td>${label}</td><td class="num"><b>${fmt(n)}</b></td><td>${date ? `(${esc(longDate(date))})` : ""}</td></tr>`;
+    const shipped = rep.shipped.length ? rep.shipped.map((r) => row("Orders Shipped", r.n, r.date)).join("") : row("Orders Shipped", 0, "");
+    const pend = p.recent.map((r) => row("Pending", r.n, r.date)).join("")
+      + (p.olderN ? `<tr><td>Pending</td><td class="num"><b>${fmt(p.olderN)}</b></td><td>(before ${esc(longDate(p.cutoff))}, ${p.older.length} delivery dates) <button class="btn small" id="toggleOlder">${showOlder ? "Hide" : "Show"}</button></td></tr>`
+        + (showOlder ? p.older.map((r) => `<tr class="muted"><td></td><td class="num">${fmt(r.n)}</td><td>(${esc(longDate(r.date))} ${esc(r.date.slice(0, 4))})</td></tr>`).join("") : "") : "")
+      + (!p.recent.length && !p.olderN ? row("Pending", 0, "") : "");
+    return `<div class="panel"><div class="btnrow" style="justify-content:space-between;align-items:center"><h3 style="margin:0">3PL Daily Update <span class="muted">${esc(longDate(day))}</span></h3><button class="btn small" id="copyReport" title="Copy the report as text">Copy report</button></div>
+      <div class="tablewrap" style="max-height:none;margin-top:10px"><table class="adm-table"><tbody>
+        ${row("Total Deliveries Arrived", rep.arrived, "")}${shipped}${pend}
+      </tbody></table></div>
+      <p class="hint" style="margin-top:8px"><b>Arrived:</b> packages with this Delivery Date that are Delivered. <b>Orders Shipped:</b> packages shipped to the customer on this day, by their Delivery Date. <b>Pending:</b> Delivered packages with this or an earlier Delivery Date that were not shipped by the end of this day.</p></div>`;
+  };
 
   const draw = () => {
     // a redraw rebuilds the page, which would throw the list's scroll position (and the page's) back to the top: keep both
     const wrap = el.querySelector("#labelsWrap"), listTop = wrap ? wrap.scrollTop : 0, pageTop = window.scrollY;
     lastSig = signature();
-    const count = new Date(year, month + 1, 0).getDate();
-    const rows = [];
-    for (let d = 1; d <= count; d++) {
-      const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-      const dow = new Date(year, month, d).getDay();
-      rows.push(`<tr class="${iso === today ? "nowrow" : ""}${dow === 0 || dow === 6 ? " adm-weekend" : ""}"><td>${MONTHS[month].slice(0, 3)} ${d}, ${year} <span class="muted">${DAYS[dow]}</span></td>
-        <td class="num">${received[iso] ? fmt(received[iso]) : "–"}</td><td class="num">${shipped[iso] ? fmt(shipped[iso]) : "–"}</td><td class="num">${pending(received[iso], shipped[iso])}</td></tr>`);
-    }
     el.innerHTML = `<div class="section-head"><div><div class="eyebrow">${esc(brand.name)}</div><h2>Admin</h2>
-        <p>Things to fix in All Orders, and the month's packages day by day. Updates live.</p></div>
-        <div class="btnrow dash-date"><button class="btn" id="prev" title="Month before">‹</button>
-          <label class="field" style="margin:0"><span>Select month</span><input type="month" id="month" value="${year}-${String(month + 1).padStart(2, "0")}"></label>
-          <button class="btn" id="next" title="Next month">›</button>
-          ${year === now.getFullYear() && month === now.getMonth() ? "" : '<button class="btn" id="thisMonth">This month</button>'}</div></div>
+        <p>Things to fix in All Orders, and the 3PL Daily Update. Updates live.</p></div>
+        <div class="btnrow dash-date"><button class="btn" id="prev" title="Day before">‹</button>
+          <label class="field" style="margin:0"><span>Select day</span><input type="date" id="day" value="${day}"></label>
+          <button class="btn" id="next" title="Next day">›</button>
+          ${day === today ? "" : '<button class="btn" id="thisDay">Today</button>'}</div></div>
       <div class="dash-cards">${cards.map((c) => `<a class="scard warn dash-card${c.panel && panel === c.panel ? " on" : ""}" ${c.panel ? `href="#admin" data-panel="${esc(c.panel)}" title="Show the list"` : `href="${esc(c.link)}" title="Show these orders in All Orders"`} style="text-decoration:none;color:inherit"><div class="dash-n">${fmt(c.n)}</div>
         <div class="dash-l">${esc(c.label)}<div class="muted">${esc(c.note)}</div></div></a>`).join("")}</div>
       ${panel === "labels" ? labelsPanel() : ""}
-      <div class="panel"><h3 style="margin:0 0 10px">${MONTHS[month]} ${year}</h3>
-        <div class="tablewrap" style="max-height:none"><table class="adm-table"><thead><tr><th>Date</th>${COLUMNS.map((c) => `<th class="num">${esc(c)}</th>`).join("")}</tr></thead>
-          <tbody>${rows.join("")}</tbody>
-          <tfoot><tr><td><b>Total</b></td><td class="num"><b>${fmt(sum(received))}</b></td><td class="num"><b>${fmt(sum(shipped))}</b></td><td class="num"><b>${pending(sum(received), sum(shipped))}</b></td></tr></tfoot></table></div></div>`;
+      ${reportPanel()}`;
     const wrap2 = el.querySelector("#labelsWrap");
     if (wrap2) wrap2.scrollTop = listTop;
     if (window.scrollY !== pageTop) window.scrollTo(0, pageTop);
@@ -81,20 +102,20 @@ export async function mount(el) {
 
   let seq = 0;
   async function load() {
-    const my = ++seq, m = `${year}-${String(month + 1).padStart(2, "0")}`;
-    received = {}; shipped = {};
+    const my = ++seq;
+    rep = null;
     draw();
     try {
-      const [r, c] = await Promise.all([api("/api/admin/month?month=" + m), api("/api/admin/cards")]);
+      const [r, c] = await Promise.all([api("/api/admin/daily?date=" + day), api("/api/admin/cards")]);
       if (my !== seq) return;
-      received = r.received; shipped = r.shipped; cards = c.cards;
+      rep = r; cards = c.cards;
       draw();
     } catch (e) { toast(e.message, "bad"); }
   }
-  const go = (n) => { const d = new Date(year, month + n, 1); year = d.getFullYear(); month = d.getMonth(); load(); };
+  const go = (n) => { const [y, m, d] = day.split("-").map(Number); day = isoOf(new Date(y, m - 1, d + n)); load(); };
   el.onchange = (e) => {
-    if (e.target.id !== "month" || !/^\d{4}-\d\d$/.test(e.target.value)) return;
-    year = +e.target.value.slice(0, 4); month = +e.target.value.slice(5, 7) - 1; load();
+    if (e.target.id !== "day" || !/^\d{4}-\d\d-\d\d$/.test(e.target.value)) return;
+    day = e.target.value; load();
   };
   el.onclick = (e) => {
     const card = e.target.closest("[data-panel]");
@@ -102,11 +123,15 @@ export async function mount(el) {
     const b = e.target.closest("button");
     if (!b) return;
     if (b.dataset.approve || b.dataset.undo) { const [rn, fid] = (b.dataset.approve || b.dataset.undo).split("|"); b.disabled = true; setApproval(+rn, fid, !!b.dataset.approve); return; }
+    if (b.id === "toggleOlder") { showOlder = !showOlder; draw(); return; }
     if (b.id === "toggleApproved") { showApproved = !showApproved; draw(); return; }
     if (b.id === "closePanel") { panel = ""; draw(); return; }
     if (b.id === "prev") go(-1);
     else if (b.id === "next") go(1);
-    else if (b.id === "thisMonth") { year = now.getFullYear(); month = now.getMonth(); load(); }
+    else if (b.id === "thisDay") { day = today; load(); }
+    else if (b.id === "copyReport") {
+      navigator.clipboard.writeText(reportText()).then(() => toast("Report copied"), () => toast("Could not copy: select the text and copy it", "bad"));
+    }
   };
   load();
   // live: when anything in the app changed, look again
@@ -120,8 +145,9 @@ export async function mount(el) {
       const slow = ++ticks % 5 === 0 && cards.some((c) => c.panel); // the label check moves on without any change in the app
       if (v === known && !slow) return;
       known = v;
-      const [r, c] = await Promise.all([api("/api/admin/month?month=" + `${year}-${String(month + 1).padStart(2, "0")}`), api("/api/admin/cards")]);
-      received = r.received; shipped = r.shipped; cards = c.cards;
+      const [r, c] = await Promise.all([api("/api/admin/daily?date=" + day), api("/api/admin/cards")]);
+      if (r.date !== day) return; // the day was changed while this was loading
+      rep = r; cards = c.cards;
       if (panel === "labels") labels = await api("/api/admin/labels");
       if (signature() !== lastSig) draw(); // nothing changed on the page: leave it alone (no jump to the top)
     } catch { /* offline for a moment */ }

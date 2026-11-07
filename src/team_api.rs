@@ -367,29 +367,46 @@ fn fmt(n: i64) -> String {
     out.chars().rev().collect()
 }
 
-/// The Admin tab's month table: per day, the packages received (Delivered rows by their Delivery Date) and shipped to the customer
-/// (the ones with that Delivery Date that were shipped on that day or later). Pending = received - shipped, worked out by the page.
-pub async fn admin_month(_a: AdminUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Json<Value>> {
-    let month = q.get("month").cloned().unwrap_or_default();
-    if month.len() != 7 || NaiveDate::parse_from_str(&format!("{month}-01"), "%Y-%m-%d").is_err() {
-        return Err(AppError::bad("Pick a month."));
+/// The Admin tab's "3PL Daily Update" for one day, the way the 3PL admin reports it:
+///  - arrived: the packages that arrived that day (Delivered rows with that Delivery Date, the same as the Dashboard's "Packages Arrived Today")
+///  - shipped: the packages shipped to the customer ON that day, split by their Delivery Date
+///  - pending: the Delivered packages with that Delivery Date or an earlier one that were still not shipped at the end of that day, split by Delivery Date
+/// Shipped means "Shipped to Customer" is ticked or the ship date is filled (a ship date after the day does not count as shipped yet).
+pub async fn admin_daily(_a: AdminUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Json<Value>> {
+    let day = q.get("date").cloned().unwrap_or_default();
+    if day.len() != 10 || NaiveDate::parse_from_str(&day, "%Y-%m-%d").is_err() {
+        return Err(AppError::bad("Pick a date."));
     }
     let sch = s.schema();
     let c = |h: &str| sch.c(h);
     let (dt, st, sc, sb) = (c("Delivery Date"), c("Source Order Status"), c("SHIPPED TO  CUSTOMER DATE"), c("Shipped to Customer"));
-    let day_counts = |sql: String| {
-        let (s, month) = (s.clone(), month.clone());
+    let by_date = |sql: String, args: Vec<String>| {
+        let s = s.clone();
         async move {
-            let rows = sqlx::query(&sql).bind(month).fetch_all(&s.db).await?;
-            Ok::<_, AppError>(rows.iter().map(|r| (r.try_get_unchecked::<String, _>(0).unwrap_or_default(), json!(r.try_get_unchecked::<i64, _>(1).unwrap_or(0)))).collect::<serde_json::Map<_, _>>())
+            let mut qy = sqlx::query(&sql);
+            for a in &args {
+                qy = qy.bind(a);
+            }
+            let rows = qy.fetch_all(&s.db).await?;
+            Ok::<_, AppError>(rows.iter().map(|r| json!({ "date": r.try_get_unchecked::<String, _>(0).unwrap_or_default(), "n": r.try_get_unchecked::<i64, _>(1).unwrap_or(0) })).collect::<Vec<_>>())
         }
     };
-    let received = day_counts(format!("SELECT substr({dt}, 1, 10), COUNT(*) FROM orders_text WHERE {st} = 'Delivered' AND substr({dt}, 1, 7) = ? GROUP BY 1")).await?;
-    let shipped = day_counts(format!(
-        "SELECT substr({dt}, 1, 10), COUNT(*) FROM orders_text WHERE substr({dt}, 1, 7) = ? AND (upper(trim({sb})) = 'TRUE' OR trim({sc}) <> '') AND (trim({sc}) = '' OR substr({sc}, 1, 10) >= substr({dt}, 1, 10)) GROUP BY 1"
-    ))
+    let arrived: i64 = sqlx::query(&format!("SELECT COUNT(*) FROM orders_text WHERE {st} = 'Delivered' AND substr({dt}, 1, 10) = ?"))
+        .bind(&day)
+        .fetch_one(&s.db)
+        .await?
+        .try_get_unchecked::<i64, _>(0)
+        .unwrap_or(0);
+    let shipped = by_date(format!("SELECT substr({dt}, 1, 10), COUNT(*) FROM orders_text WHERE substr({sc}, 1, 10) = ? GROUP BY 1 ORDER BY 1"), vec![day.clone()]).await?;
+    let pending = by_date(
+        format!(
+            "SELECT substr({dt}, 1, 10), COUNT(*) FROM orders_text WHERE {st} = 'Delivered' AND substr({dt}, 1, 10) <> '' AND substr({dt}, 1, 10) <= ? \
+             AND NOT ((upper(trim({sb})) = 'TRUE' OR trim({sc}) <> '') AND (trim({sc}) = '' OR substr({sc}, 1, 10) <= ?)) GROUP BY 1 ORDER BY 1"
+        ),
+        vec![day.clone(), day.clone()],
+    )
     .await?;
-    Ok(Json(json!({ "month": month, "received": received, "shipped": shipped })))
+    Ok(Json(json!({ "date": day, "arrived": arrived, "shipped": shipped, "pending": pending })))
 }
 
 #[cfg(test)]
