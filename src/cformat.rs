@@ -37,7 +37,7 @@ pub fn fill_sql(schema: &Schema, header: &str, today: &str, day_ago: &str) -> St
     if DUP_COLUMNS.contains(&header) {
         let col = c(header);
         whens.push(format!(
-            "WHEN trim({col}) <> '' AND lower(trim({col})) IN (SELECT lower(trim({col})) FROM orders_text WHERE trim({col}) <> '' GROUP BY 1 HAVING COUNT(*) > 1) THEN 'dup'"
+            "WHEN trim({col}) <> '' AND lower(trim({col})) IN (SELECT v FROM (SELECT lower(trim({col})) v FROM orders_text WHERE trim({col}) <> '' GROUP BY 1 HAVING COUNT(*) > 1) d) THEN 'dup'" // (the derived table is worked out once; without it the server repeated it for every row and the list never came back)
         ));
     }
     if ROW_COLS.contains(&header) {
