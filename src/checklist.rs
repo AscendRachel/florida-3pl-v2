@@ -1,5 +1,5 @@
 //! The Team Daily Check List: the daily tasks of the team (each row in the colour of the agent assigned), the ticks of each day,
-//! the numbers the app counts by itself (tasks A, B, D, F, G, O and P; the other tasks are typed), and the two free lists beside it.
+//! the numbers the app counts by itself (tasks A, B, D, E, F, G, H, I, O and P; the other tasks are typed), and the two free lists beside it.
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -16,10 +16,13 @@ use crate::error::{AppError, AppResult};
 use crate::{clock, AppState};
 
 /// The tasks whose number the app counts, and how (shown on the page when the number is hovered).
-const COUNTED: [(&str, &str); 7] = [
+const COUNTED: [(&str, &str); 10] = [
     ("A", "Right now: orders with a Source Order Number and no Source Tracking Number, whose status is not Delivered, Cancelled, Refunded or For Refund."),
     ("B", "On this day: orders whose Source Order Status changed from In Transit to Delivered."),
     ("D", "On this day: orders that were ticked Package Not Received."),
+    ("E", "On this day: orange rows (Package Not Received ticked) whose Source Order Status was changed to Refunded."),
+    ("H", "On this day: pink rows (For Refund) whose Source Order Status was changed to Refunded."),
+    ("I", "On this day: orders whose Source Order Status was changed to Cancelled."),
     ("F", "On this day: rows that were red in All Orders and changed to another colour (actioned / resolved)."),
     ("G", "On this day: rows that were magenta in All Orders and changed to another colour (actioned / resolved)."),
     ("O", "On this day: orders whose empty Brand or Product Image Link was filled with data."),
@@ -201,6 +204,28 @@ async fn changes(s: &AppState, day: NaiveDate, field: &str, old: Option<&str>, n
     Ok(q.fetch_one(&s.db).await?.try_get_unchecked::<i64, _>(0).unwrap_or(0))
 }
 
+/// Orders whose Source Order Status was changed to `new` on that day (from `old` when given, else from anything else),
+/// optionally only those that are orange (Package Not Received ticked) now.
+async fn status_to(s: &AppState, day: NaiveDate, old: Option<&str>, new: &str, orange: bool) -> AppResult<i64> {
+    let start = day.and_hms_opt(0, 0, 0).unwrap_or_default();
+    let end = start + Duration::days(1);
+    let from = match old {
+        Some(_) => "lower(trim(IFNULL(e.old_value, ''))) = ?",
+        None => "lower(trim(IFNULL(e.old_value, ''))) <> ?",
+    };
+    let join = if orange {
+        let sch = s.schema();
+        format!("JOIN orders_text o ON o.rn = e.rn AND upper(trim(o.{})) = 'TRUE'", sch.c("Package Not Received"))
+    } else {
+        String::new()
+    };
+    let sql = format!(
+        "SELECT COUNT(DISTINCT e.rn) FROM edit_log e {join} WHERE e.at >= ? AND e.at < ? AND e.field = 'source_order_status' AND lower(trim(IFNULL(e.new_value, ''))) = ? AND {from}"
+    );
+    let q = sqlx::query(&sql).bind(start).bind(end).bind(new.to_lowercase()).bind(old.unwrap_or(new).to_lowercase());
+    Ok(q.fetch_one(&s.db).await?.try_get_unchecked::<i64, _>(0).unwrap_or(0))
+}
+
 /// The whole page for one day.
 pub async fn get(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Json<Value>> {
     let today = clock::now().date();
@@ -227,6 +252,9 @@ pub async fn get(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Has
     }
     n.insert("B", Some(changes(&s, day, "source_order_status", Some("In Transit"), "Delivered").await?));
     n.insert("D", Some(changes(&s, day, "package_not_received", None, "TRUE").await?));
+    n.insert("E", Some(status_to(&s, day, None, "Refunded", true).await?));
+    n.insert("H", Some(status_to(&s, day, Some("For Refund"), "Refunded", false).await?));
+    n.insert("I", Some(status_to(&s, day, None, "Cancelled", false).await?));
     n.insert("P", Some(changes(&s, day, "tracking_status", Some("In Transit"), "Delivered").await?));
     let (red, magenta) = left_colours(&s, day).await?;
     n.insert("F", Some(red));
