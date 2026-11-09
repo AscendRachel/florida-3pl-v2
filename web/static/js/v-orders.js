@@ -36,6 +36,8 @@ export async function mount(el, params, ctx) {
   const meta = await api("/api/meta");
   let savedViews = [];
   try { savedViews = (await api("/api/views")).views; } catch { /* the grid still works without saved views */ }
+  // left All Orders while these two answers were on the way (a card clicked and Back pressed at once): there is no page left to fill
+  if (!el.isConnected || location.hash.split("?")[0] !== "#orders") return;
   const cols = meta.columns.filter((c) => !c.name.includes("Softr"));
   const hidden = new Set(readJson("gt_orders_hidden", DEFAULT_HIDDEN));
   // Gift Note (Label Number + Customer Name) used to start hidden: show it once for everyone who had it hidden; their own choice after that is kept
