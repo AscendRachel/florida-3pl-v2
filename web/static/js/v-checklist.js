@@ -42,7 +42,7 @@ export async function mount(el, params, ctx) {
           <button class="btn" id="next" title="Next day">›</button>
           ${day === data.today ? "" : '<button class="btn" id="today">Today</button>'}</div></div>
       <div class="dash-cards" style="margin-bottom:12px"><a class="scard warn dash-card" href="#orders?show=preship" title="Show these orders in All Orders" style="text-decoration:none;color:inherit"><div class="dash-n">${fmt(data.preshipment)}</div>
-        <div class="dash-l">Total Preshipment<div class="muted">Tracking Status is Preshipment, leaving out For Refund, Refunded, Cancelled, Unfulfilled and empty rows (no Store Order No.)</div></div></a></div>
+        <div class="dash-l">Total Preshipment<div class="muted">Tracking Status is Preshipment, leaving out For Refund, Refunded, Cancelled, Unfulfilled, empty rows (no Store Order No.), and the ones ticked To Void or Package Not Received</div></div></a></div>
       <div class="chk-legend"><div class="chk-head">AGENT LEGEND</div>${data.agents.map((a) => `<div class="chk-agent" style="background:${esc(a.color)}">${esc(a.name)}</div>`).join("")}</div>
       <p class="chk-rule">Use your assigned color to identify that you're the one doing the task.</p>
       <div class="chk-main tablewrap" style="max-height:none"><table class="chk-table"><thead><tr><th>DAILY TASK</th>${FIELDS.map(([, l]) => `<th>${l}</th>`).join("")}<th>NUMBERS</th>${COLUMNS.map(([, l]) => `<th>${l}</th>`).join("")}</tr></thead>
