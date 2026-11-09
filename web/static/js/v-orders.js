@@ -86,6 +86,8 @@ export async function mount(el, params, ctx) {
   const query = (extra = {}) => ({ q: st.q, card: st.card, sort: st.sort, dir: st.dir, flt: st.cf, ...extra });
   const rowAt = (i) => pages.get(Math.floor(i / PAGE))?.[i % PAGE];
   const countText = () => `${fmt(st.total)} order${st.total === 1 ? "" : "s"}${nFilters() ? ` · ${nFilters()} column filter${nFilters() === 1 ? "" : "s"}` : ""}`;
+  // (a page that answers after the person has already left All Orders finds nothing to write to: that is not an error)
+  const showCount = () => { const t = countText(), a = $("#count"), b = $("#sbL"); if (a) a.textContent = t; if (b) b.textContent = t; };
 
   async function loadPage(p) {
     if (pages.has(p) || inflight.has(p)) return;
@@ -100,7 +102,7 @@ export async function mount(el, params, ctx) {
       for (const [id, l] of Object.entries(r.lists)) lists.set(+id, l);
       st.total = r.total;
       body.style.height = st.total * ROW_H + "px";
-      $("#count").textContent = $("#sbL").textContent = countText();
+      showCount();
       paint();
     } catch (e) { toast(e.message, "bad"); }
     finally { inflight.delete(p); }
@@ -1053,7 +1055,7 @@ export async function mount(el, params, ctx) {
         st.total = r.total;
       }
       body.style.height = st.total * ROW_H + "px";
-      $("#count").textContent = $("#sbL").textContent = countText();
+      showCount();
       loadDupesSoon();
       refreshCards();
       paint(); updateBar();
