@@ -1575,9 +1575,14 @@ export async function mount(el, params, ctx) {
   }
   // coming from the Team Daily Check List card: Tracking Status is Preshipment, and the Source Order Status is not For Refund, Refunded, Cancelled or Unfulfilled
   const trackCol = cols.find((c) => c.key === "Tracking Status");
-  if (params.get("show") === "preship" && trackCol && statusCol) {
+  if (params.get("show") === "preship" && trackCol && statusCol && storeCol) {
     st.q = ""; st.card = ""; st.sort = ""; st.dir = "asc"; $("#q").value = "";
-    st.cf = { [trackCol.i]: { c: null, v: { mode: "in", list: ["Preshipment"] }, k: null }, [statusCol.i]: { c: null, v: { mode: "out", list: ["For Refund", "Refunded", "Cancelled", "Unfulfilled"] }, k: null } };
+    // (and it has a Store Order No.: a row with none is an empty row that only holds a label number)
+    st.cf = {
+      [trackCol.i]: { c: null, v: { mode: "in", list: ["Preshipment"] }, k: null },
+      [statusCol.i]: { c: null, v: { mode: "out", list: ["For Refund", "Refunded", "Cancelled", "Unfulfilled"] }, k: null },
+      [storeCol.i]: { c: { op: "notempty", a: "", b: "" }, v: null, k: null },
+    };
   }
   // coming from a notification: search for that order and pick out the row (and the note's cell)
   const wantRow = +params.get("row") || 0;

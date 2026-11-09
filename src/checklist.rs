@@ -253,10 +253,12 @@ pub async fn get(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Has
     // the card: the orders whose Tracking Status is Preshipment, except the ones whose Source Order Status says they are not going to ship
     // (For Refund, Refunded, Cancelled, Unfulfilled). All Orders opens with the same two filters.
     let sch = s.schema();
+    // (and only real orders: a row with no Store Order No. is an empty row that only holds a label number)
     let preshipment = sqlx::query(&format!(
-        "SELECT COUNT(*) FROM orders_text WHERE {} = 'Preshipment' AND lower(trim({})) NOT IN ('for refund', 'refunded', 'cancelled', 'unfulfilled')",
+        "SELECT COUNT(*) FROM orders_text WHERE {} = 'Preshipment' AND lower(trim({})) NOT IN ('for refund', 'refunded', 'cancelled', 'unfulfilled') AND trim({}) <> ''",
         sch.c("Tracking Status"),
-        sch.c("Source Order Status")
+        sch.c("Source Order Status"),
+        sch.c("Store Order No.")
     ))
     .fetch_one(&s.db)
     .await?
