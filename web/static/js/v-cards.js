@@ -198,14 +198,14 @@ export async function mount(el, params, ctx) {
     const r = rows[n];
     if (!r) return;
     const cur = (k) => val(r, k);
-    // Return to Sender: no Shipped to Customer and no Stock; Package Not Received instead
-    const bools = rts ? [...BOOLS.filter((k) => k !== "Shipped to Customer" && k !== "Stock"), "Package Not Received"] : BOOLS;
+    // Return to Sender and Return to Amazon: no Shipped to Customer and no Stock; Package Not Received instead
+    const bools = rts || rta ? [...BOOLS.filter((k) => k !== "Shipped to Customer" && k !== "Stock"), "Package Not Received"] : BOOLS;
     const res = await dialog({
       title: `${cur("Label Number")} · ${cur("Customer Name")}`,
       wide: true,
       body: `<label class="field"><span>${esc(label("Notes"))}</span><textarea name="Notes" rows="3">${esc(cur("Notes"))}</textarea></label>
         <div class="checkgrid">${bools.map((k) => `<label class="check"><input type="checkbox" name="${esc(k)}" ${cur(k) === "TRUE" ? "checked" : ""}> ${esc(label(k))}</label>`).join("")}</div>
-        <p class="hint">Ticking ${rts ? "Shipped to Amazon" : "Shipped to Customer or Shipped to Amazon"} stamps the date and time, as in All Orders. Everything you change is recorded under your name.</p>`,
+        <p class="hint">Ticking ${rts || rta ? "Shipped to Amazon" : "Shipped to Customer or Shipped to Amazon"} stamps the date and time, as in All Orders. Everything you change is recorded under your name.</p>`,
       actions: [["Cancel", "close"], ["Save", "ok", "primary"]],
     });
     if (res.value !== "ok") return;
