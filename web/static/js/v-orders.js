@@ -1553,6 +1553,9 @@ export async function mount(el, params, ctx) {
   if (wantBlank && storeCol) {
     st.q = ""; st.card = ""; st.sort = ""; st.dir = "asc"; $("#q").value = "";
     st.cf = { [wantBlank.i]: { c: { op: "empty", a: "", b: "" }, v: null, k: null }, [storeCol.i]: { c: { op: "notempty", a: "", b: "" }, v: null, k: null } };
+    // the Missing Image / Missing Brand cards leave out some Source Order Statuses (Cancelled, Unfulfilled)
+    const skip = (params.get("notstatus") || "").split(",").filter(Boolean), srcStatus = cols.find((c) => c.key === "Source Order Status");
+    if (skip.length && srcStatus) st.cf[srcStatus.i] = { c: null, v: { mode: "out", list: skip }, k: null };
   }
   // coming from the Admin card of labels to void: To Void is checked and Label Voided is not
   const voidCol = cols.find((c) => c.key === "To Void"), voidedCol = cols.find((c) => c.key === "Label Voided");

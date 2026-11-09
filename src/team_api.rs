@@ -316,8 +316,10 @@ pub async fn admin_cards(_a: AdminUser, State(s): State<AppState>) -> AppResult<
         Some(c) => c,
         None => {
             let has = format!("trim({}) <> ''", c("Store Order No."));
+            // the Missing Image / Missing Brand cards leave out the orders that will never ship: Cancelled and Unfulfilled
+            let live = format!("lower(trim({})) NOT IN ('cancelled', 'unfulfilled')", c("Source Order Status"));
             let sql = format!(
-                "SELECT CAST(COALESCE(SUM({has} AND trim({img}) = ''), 0) AS SIGNED), CAST(COALESCE(SUM({has} AND trim({brand}) = ''), 0) AS SIGNED), \
+                "SELECT CAST(COALESCE(SUM({has} AND {live} AND trim({img}) = ''), 0) AS SIGNED), CAST(COALESCE(SUM({has} AND {live} AND trim({brand}) = ''), 0) AS SIGNED), \
                  CAST(COALESCE(SUM(upper(trim({tv})) = 'TRUE' AND upper(trim({lv})) <> 'TRUE'), 0) AS SIGNED), CAST(COALESCE(SUM({has} AND trim({link}) = ''), 0) AS SIGNED), \
                  CAST(COALESCE(SUM(upper(trim({sa})) = 'TRUE' AND lower(trim({st})) <> 'refunded'), 0) AS SIGNED) FROM orders_text",
                 img = c("Product Image Link"), brand = c("Brand"), tv = c("To Void"), lv = c("Label Voided"), link = c("Shipping Label Link"), sa = c("Shipped to Amazon"), st = c("Source Order Status")
@@ -332,7 +334,7 @@ pub async fn admin_cards(_a: AdminUser, State(s): State<AppState>) -> AppResult<
         }
     };
     for (i, (key, label)) in [("Product Image Link", "Missing Product Image Link"), ("Brand", "Missing Brand")].into_iter().enumerate() {
-        out.push(json!({ "key": key, "label": label, "n": counts[i], "note": "orders with an empty cell", "link": format!("#orders?blank={}", enc(key)) }));
+        out.push(json!({ "key": key, "label": label, "n": counts[i], "note": "orders with an empty cell, leaving out Cancelled and Unfulfilled", "link": format!("#orders?blank={}&notstatus=Cancelled,Unfulfilled", enc(key)) }));
     }
     out.push(json!({ "key": "tovoid", "label": "To Void, Label Not Yet Voided", "n": counts[2], "note": "To Void is checked, Label Voided is not", "link": "#orders?show=tovoid" }));
     out.push(json!({ "key": "dupusps", "label": "USPS Tracking Duplicate", "n": counts[5], "note": "rows sharing a Tracking Number To Customer", "link": "#orders?show=dupusps" }));
