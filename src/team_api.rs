@@ -326,7 +326,7 @@ pub async fn admin_cards(_a: AdminUser, State(s): State<AppState>) -> AppResult<
             );
             let row = sqlx::query(&sql).fetch_one(&s.db).await?;
             let mut v: Vec<i64> = (0..5).map(|i| row.try_get_unchecked::<i64, _>(i).unwrap_or(0)).collect();
-            let dup = |col: String| format!("SELECT COALESCE(SUM(n), 0) FROM (SELECT COUNT(*) n FROM orders_text WHERE trim({col}) <> '' GROUP BY lower(trim({col})) HAVING COUNT(*) > 1) d");
+            let dup = |col: String| format!("SELECT CAST(COALESCE(SUM(n), 0) AS SIGNED) FROM (SELECT COUNT(*) n FROM orders_text WHERE trim({col}) <> '' GROUP BY lower(trim({col})) HAVING COUNT(*) > 1) d");
             v.push(n(&s, &dup(c("Tracking Number To Customer"))).await?);
             v.push(n(&s, &dup(c("Shipping Label Link"))).await?);
             *COUNTS_CACHE.lock().unwrap() = Some((s.version_now(), std::time::Instant::now(), v.clone()));
