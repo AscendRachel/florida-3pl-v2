@@ -57,6 +57,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/scan/samples", get(crate::scan::samples))
         .route("/api/scan/:action", post(crate::scan::scan_post))
         .route("/api/label", get(crate::scan::label))
+        .route("/api/returns/label", get(crate::scan::return_label))
         .route("/api/chat", get(crate::team_api::chat))
         .route("/api/chat/send", post(crate::team_api::chat_send))
         .route("/api/worklog", get(crate::team_api::worklog))

@@ -506,7 +506,25 @@ pub async fn label(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<H
     let mut tx = s.db.begin().await?;
     let d = get_order(&mut tx, &sch, rn).await?.ok_or_else(|| AppError::bad("That order no longer exists."))?;
     drop(tx);
-    let Some(m) = drive_id().captures(d.g("Shipping Label Link")) else { return Err(AppError::bad("This order has no shipping label link.")) };
+    Ok(pdf(drive_pdf(rn, d.g("Shipping Label Link"), "This order has no shipping label link.").await?))
+}
+
+/// The return label PDF of a Store Returns card (its RETURN LABEL LINK), fetched from Google Drive, so the browser can print it.
+pub async fn return_label(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Response> {
+    let rid = q.get("rid").cloned().unwrap_or_default();
+    let link: Option<String> = sqlx::query_scalar("SELECT CAST(IFNULL(label_link,'') AS CHAR) FROM returns WHERE rid = ? LIMIT 1").bind(&rid).fetch_optional(&s.db).await?;
+    let link = link.ok_or_else(|| AppError::bad("That return no longer exists."))?;
+    // the cache key of a return: its link's hash, with the top bit set so it never meets an order's row number
+    let key = { use std::hash::{Hash, Hasher}; let mut h = std::collections::hash_map::DefaultHasher::new(); link.hash(&mut h); h.finish() | (1 << 63) };
+    Ok(pdf(drive_pdf(key, &link, "This return has no return label link.").await?))
+}
+
+/// The PDF behind a Google Drive link (kept in a small cache under `key`).
+async fn drive_pdf(key: u64, link: &str, no_link: &str) -> AppResult<Vec<u8>> {
+    if let Some(data) = label_cache().lock().unwrap().get(&key).cloned() {
+        return Ok(data);
+    }
+    let Some(m) = drive_id().captures(link) else { return Err(AppError::bad(no_link)) };
     let url = format!("https://drive.google.com/uc?export=download&id={}", &m[1]);
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(60)).user_agent("Florida3PL").build()?;
     let data = client.get(url).send().await.map_err(|e| AppError::bad(format!("Could not download the label from Google Drive ({e}).")))?.bytes().await.map_err(|e| AppError::bad(format!("Could not download the label from Google Drive ({e}).")))?;
@@ -519,9 +537,9 @@ pub async fn label(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<H
         if c.len() > 60 {
             c.clear();
         }
-        c.insert(rn, data.clone());
+        c.insert(key, data.clone());
     }
-    Ok(pdf(data))
+    Ok(data)
 }
 
 fn pdf(data: Vec<u8>) -> Response {

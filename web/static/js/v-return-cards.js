@@ -2,6 +2,7 @@
 // The returns come from the Returns tab (the master returns sheet); the warehouse changes only Shipped to Amazon and its own notes here.
 import { $, api, brand, debounce, dialog, esc, fmt, toast } from "./util.js";
 import { cardTabs } from "./card-tabs.js";
+import { labelPages, printPages } from "./print.js";
 
 const PAGE = 48;
 const MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -11,6 +12,7 @@ const showDate = (v) => {
   return `${MONTH[+m[2] - 1]} ${+m[3]}, ${m[1]}${m[4] ? ` ${+m[4] % 12 || 12}:${m[5]} ${+m[4] >= 12 ? "PM" : "AM"}` : ""}`;
 };
 const isUrl = (v) => /^https?:\/\//.test(v || "");
+const DRIVE = /\/d\/[-\w]{25,}/;
 const PILL = { DELIVERED: "s-ok", "PENDING RETURN": "s-warn", "IN TRANSIT": "s-info" };
 const yesNo = (v) => (v === "TRUE" ? "Yes" : v === "FALSE" ? "No" : v === "" ? "(blank)" : v);
 
@@ -90,6 +92,7 @@ export async function mount(el, params, ctx) {
   }
 
   // ---------- cards
+  const canPrint = (r) => DRIVE.test(r.label_link || ""); // the return label is a PDF on Google Drive
   const flag = (v) => (v === "TRUE" ? "✓" : "—");
   const field = (name, html) => (html.replace(/<[^>]*>/g, "").trim() === "" ? "" : `<div class="cf"><span class="cl">${esc(name)}</span><div class="cv">${html}</div></div>`);
   const pill = (v) => (v ? `<span class="pill ${PILL[v] || "s-neutral"}">${esc(v)}</span>` : "");
@@ -119,7 +122,7 @@ export async function mount(el, params, ctx) {
         ${r.shipped === "TRUE" ? field(L("processed_by", "PROCESSED BY") + ":", `<small>${esc(r.processed_by)}${r.processed_at ? " · " + esc(showDate(r.processed_at)) : ""}</small>`) : ""}
         ${field(L("wh_notes", "WAREHOUSE NOTES") + ":", `<small>${esc(r.wh_notes)}</small>`)}
       </div>
-      <div class="oc-actions"><button class="btn primary" data-edit="${esc(r.rid)}">Edit</button></div>
+      <div class="oc-actions">${canPrint(r) ? `<button class="btn primary" data-print="${esc(r.rid)}">Print label</button>` : ""}<button class="btn${canPrint(r) ? "" : " primary"}" data-edit="${esc(r.rid)}">Edit</button></div>
     </article>`;
   }
 
@@ -156,9 +159,16 @@ export async function mount(el, params, ctx) {
     } catch (e) { toast(e.message, "bad"); }
   }
 
+  async function printLabel(rid, btn) {
+    btn.disabled = true;
+    try { await printPages(await labelPages(`/api/returns/label?rid=${encodeURIComponent(rid)}`)); } catch (e) { toast(`PRINT ERROR: ${e.message}`, "bad"); }
+    btn.disabled = false;
+  }
+
   // ---------- wiring
   el.onclick = (e) => {
     const t = e.target;
+    const pr = t.closest("[data-print]"); if (pr) return printLabel(pr.dataset.print, pr);
     const f = t.closest("[data-filter]");
     if (f) return menu ? closeMenu() : openMenu(f.dataset.filter, f);
     if (t.closest("#clearFilters")) { st.flt = {}; st.q = ""; $("#cardSearch").value = ""; drawFilters(); return redraw(true); }
