@@ -484,3 +484,31 @@ main:has(.kwrap) { max-width: 2200px; padding-left: clamp(16px, 2.5vw, 48px); pa
 /* Admin month table */
 .adm-table .adm-weekend td { opacity: .75; }
 .adm-table td:first-child { white-space: nowrap; }
+
+/* Team Daily Check List: the colours are the agents' own (like the sheet), so the text on them is always dark */
+.chk-legend { display: flex; flex-wrap: wrap; border: 3px solid #000; width: fit-content; max-width: 100%; margin: 0 0 6px; }
+.chk-legend > div { padding: 8px 18px; font-weight: 800; font-size: 20px; letter-spacing: .02em; color: #000; }
+.chk-legend .chk-head { background: #fff; }
+.chk-rule { color: #e00000; font-weight: 700; font-size: 18px; margin: 4px 0 10px; }
+.chk-wrap { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 1000px) { .chk-wrap { grid-template-columns: 1fr; } }
+.chk-table { width: 100%; border-collapse: collapse; color: #000; }
+.chk-table th { background: #000; color: #fff; font-size: 17px; letter-spacing: .02em; padding: 7px 10px; text-align: center; }
+.chk-table td { border: 1px solid rgba(0, 0, 0, .35); padding: 6px 10px; color: #000; vertical-align: middle; }
+.chk-table .chk-t { font-weight: 700; min-width: 280px; }
+.chk-table .chk-c { text-align: center; width: 84px; }
+.chk-table .chk-c input { width: 20px; height: 20px; cursor: pointer; accent-color: #1f7a4d; }
+.chk-table .chk-n { min-width: 150px; text-align: center; font-weight: 700; }
+.chk-table .typed { text-align: left; padding: 3px; }
+.chk-table textarea { width: 100%; min-height: 28px; background: rgba(255, 255, 255, .55); border: 1px solid rgba(0, 0, 0, .3); border-radius: 4px; color: #000; padding: 4px 6px; resize: vertical; font: inherit; font-weight: 600; }
+.chk-edit { border: 0; background: rgba(255, 255, 255, .6); border-radius: 4px; cursor: pointer; font-size: 13px; padding: 0 5px; color: #000; }
+.chk-how { margin-top: 10px; }
+.chk-how summary { cursor: pointer; font-weight: 600; }
+.chk-how ul { margin: 6px 0 4px 18px; padding: 0; }
+.chk-side { display: grid; gap: 14px; }
+.chk-list .chk-head { background: #000; color: #fff; font-weight: 800; font-size: 17px; text-align: center; padding: 7px 10px; }
+.chk-list .chk-body { padding: 8px; display: grid; gap: 6px; color: #000; }
+.chk-item { display: flex; gap: 6px; align-items: flex-start; }
+.chk-item textarea { flex: 1; min-height: 30px; background: rgba(255, 255, 255, .6); border: 1px solid rgba(0, 0, 0, .25); border-radius: 4px; color: #000; padding: 5px 7px; resize: vertical; font: inherit; }
+.chk-del { border: 0; background: rgba(0, 0, 0, .12); color: #000; border-radius: 4px; width: 26px; height: 26px; cursor: pointer; font-size: 17px; line-height: 1; }
+.chk-del:hover { background: rgba(200, 0, 0, .35); }

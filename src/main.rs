@@ -9,6 +9,7 @@ mod admin_api;
 mod amazon;
 mod auth;
 mod cformat;
+mod checklist;
 mod clock;
 mod config;
 mod dashboard;

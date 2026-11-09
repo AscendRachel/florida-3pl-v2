@@ -2,7 +2,7 @@
 import { applyBranding } from "./branding.js";
 import { api, brand, confirmBox, dialog, esc, toast } from "./util.js";
 
-const TAB_LIST = [["dashboard", "Dashboard"], ["scan", "Scan"], ["cards", "Order Cards"], ["orders", "All Orders"], ["returns", "Returns"], ["materials", "Materials"]];
+const TAB_LIST = [["dashboard", "Dashboard"], ["scan", "Scan"], ["cards", "Order Cards"], ["orders", "All Orders"], ["returns", "Returns"], ["materials", "Materials"], ["checklist", "Team Daily Check List"]];
 const tabBoxes = (on) => `<fieldset class="tabpick" style="border:1px solid var(--line,#ccc);border-radius:8px;padding:8px 12px;margin:0 0 10px"><legend>Tabs this person can see</legend>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px">${TAB_LIST.map(([k, l]) => `<label class="check"><input type="checkbox" name="tab" value="${k}" ${!on || on.includes(k) ? "checked" : ""}> ${l}</label>`).join("")}</div></fieldset>`;
 const ROLE_NAME = { admin: "Admin", warehouse: "Warehouse", member: "Member" };
