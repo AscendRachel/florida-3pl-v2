@@ -36,9 +36,19 @@ pub fn fill_sql(schema: &Schema, header: &str, today: &str, day_ago: &str) -> St
     let mut whens: Vec<String> = vec![];
     if DUP_COLUMNS.contains(&header) {
         let col = c(header);
-        whens.push(format!(
-            "WHEN trim({col}) <> '' AND lower(trim({col})) IN (SELECT v FROM (SELECT lower(trim({col})) v FROM orders_text WHERE trim({col}) <> '' GROUP BY 1 HAVING COUNT(*) > 1) d) THEN 'dup'" // (the derived table is worked out once; without it the server repeated it for every row and the list never came back)
-        ));
+        // The values that occur more than once are looked up beforehand (see `dup_values`) and written in as a plain list: asking the
+        // database for them inside this expression made it repeat the search for every order, so a list of 78,000 rows never came back.
+        match dup_values(header) {
+            Some(list) if list.is_empty() => {}
+            Some(list) => {
+                let (bs, q) = (char::from(92u8), char::from(39u8));
+                let lits: Vec<String> = list.iter().map(|v| format!("{q}{}{q}", v.replace(bs, &format!("{bs}{bs}")).replace(q, &format!("{q}{q}")).replace(char::from(0u8), ""))).collect();
+                whens.push(format!("WHEN trim({col}) <> '' AND lower(trim({col})) IN ({}) THEN 'dup'", lits.join(",")));
+            }
+            None => whens.push(format!(
+                "WHEN trim({col}) <> '' AND lower(trim({col})) IN (SELECT v FROM (SELECT lower(trim({col})) v FROM orders_text WHERE trim({col}) <> '' GROUP BY 1 HAVING COUNT(*) > 1) d) THEN 'dup'"
+            )),
+        }
     }
     if ROW_COLS.contains(&header) {
         let rules: Vec<(String, &str)> = vec![
@@ -89,5 +99,26 @@ pub fn fill_sql(schema: &Schema, header: &str, today: &str, day_ago: &str) -> St
         "''".to_string()
     } else {
         format!("(CASE {} ELSE '' END)", whens.join(" "))
+    }
+}
+
+/// The values of each duplicate-checked column that occur more than once (lower-cased, trimmed), with the data version they were read at.
+static DUPS: std::sync::Mutex<Option<std::collections::HashMap<String, (u64, std::sync::Arc<Vec<String>>)>>> = std::sync::Mutex::new(None);
+/// Most values that are written into a query as a list; more than that and the query asks the database instead.
+pub const DUP_LIST_MAX: usize = 30_000;
+
+pub fn dup_values(header: &str) -> Option<std::sync::Arc<Vec<String>>> {
+    DUPS.lock().unwrap().as_ref()?.get(header).map(|(_, l)| l.clone())
+}
+pub fn dup_version(header: &str) -> Option<u64> {
+    DUPS.lock().unwrap().as_ref()?.get(header).map(|(v, _)| *v)
+}
+pub fn set_dup_values(header: &str, version: u64, list: Vec<String>) {
+    let mut g = DUPS.lock().unwrap();
+    let m = g.get_or_insert_with(Default::default);
+    if list.len() > DUP_LIST_MAX {
+        m.remove(header);
+    } else {
+        m.insert(header.to_string(), (version, std::sync::Arc::new(list)));
     }
 }

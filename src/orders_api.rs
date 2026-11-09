@@ -85,7 +85,35 @@ pub async fn orders_get(u: CurrentUser, st: State<AppState>, Query(q): Query<Has
     orders(u, st, Json(query_value(q))).await
 }
 
+/// Looks up (once per change of the data) the duplicate values of the Duplicate-checked columns that this request filters or sorts by
+/// colour, or that it asks about (`also`), so the colour expression can use them as a plain list.
+async fn prepare_dups(s: &AppState, p: &Value, also: Option<usize>) -> AppResult<()> {
+    let sch = s.schema();
+    let mut cols: Vec<usize> = also.into_iter().collect();
+    if let Some(flt) = p.get("flt").and_then(Value::as_object) {
+        cols.extend(flt.iter().filter(|(_, f)| f.get("k").is_some()).filter_map(|(k, _)| k.parse::<usize>().ok()));
+    }
+    if let Some(j) = p.get("sort").and_then(Value::as_str).and_then(|x| x.strip_prefix("color:")).and_then(|r| r.split(':').next()).and_then(|j| j.parse::<usize>().ok()) {
+        cols.push(j);
+    }
+    let v = s.version_now();
+    for j in cols {
+        if j >= sch.n() || !sch.active(j) {
+            continue;
+        }
+        let header = sch.cols[j].header.as_str();
+        if !cformat::DUP_COLUMNS.contains(&header) || cformat::dup_version(header) == Some(v) {
+            continue;
+        }
+        let c = sch.c(header);
+        let list: Vec<String> = sqlx::query_scalar(&format!("SELECT CAST(lower(trim({c})) AS CHAR) FROM orders_text WHERE trim({c}) <> '' GROUP BY 1 HAVING COUNT(*) > 1")).fetch_all(&s.db).await?;
+        cformat::set_dup_values(header, v, list);
+    }
+    Ok(())
+}
+
 pub async fn orders(_u: CurrentUser, State(s): State<AppState>, Json(p): Json<Value>) -> AppResult<Json<Value>> {
+    prepare_dups(&s, &p, None).await?;
     let sch = s.schema();
     let w = filters::build_where(&sch, &p, None)?;
     let total: i64 = bind_args(sqlx::query(&format!("SELECT COUNT(*) FROM orders_text{}", w.sql)), &w.args).fetch_one(&s.db).await?.try_get(0)?;
@@ -204,6 +232,7 @@ fn column_of(sch: &crate::schema::Schema, p: &Value) -> AppResult<usize> {
 pub async fn colors(_u: CurrentUser, State(s): State<AppState>, Json(p): Json<Value>) -> AppResult<Json<Value>> {
     let sch = s.schema();
     let j = column_of(&sch, &p)?;
+    prepare_dups(&s, &p, Some(j)).await?;
     let w = filters::build_where(&sch, &p, Some(j))?;
     let expr = filters::fill_expr(&sch, j);
     if expr == "''" {
