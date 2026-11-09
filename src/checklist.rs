@@ -250,9 +250,18 @@ pub async fn get(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Has
         .collect();
     let items: Vec<(i32, String, String, String)> = sqlx::query_as("SELECT pos, CAST(kind AS CHAR), `text`, updated_by FROM checklist_items ORDER BY pos").fetch_all(&s.db).await?;
     let list = |kind: &str| items.iter().filter(|i| i.1 == kind).map(|(pos, _, text, by)| json!({ "pos": pos, "text": text, "by": by })).collect::<Vec<_>>();
-    // the card: every order whose Tracking Status is Preshipment (the same count as the Pre-shipment card of All Orders)
+    // the card: the orders whose Tracking Status is Preshipment, except the ones whose Source Order Status says they are not going to ship
+    // (For Refund, Refunded, Cancelled, Unfulfilled). All Orders opens with the same two filters.
     let sch = s.schema();
-    let preshipment = sqlx::query(&format!("SELECT COUNT(*) FROM orders_text WHERE {} = 'Preshipment'", sch.c("Tracking Status"))).fetch_one(&s.db).await?.try_get_unchecked::<i64, _>(0).unwrap_or(0);
+    let preshipment = sqlx::query(&format!(
+        "SELECT COUNT(*) FROM orders_text WHERE {} = 'Preshipment' AND lower(trim({})) NOT IN ('for refund', 'refunded', 'cancelled', 'unfulfilled')",
+        sch.c("Tracking Status"),
+        sch.c("Source Order Status")
+    ))
+    .fetch_one(&s.db)
+    .await?
+    .try_get_unchecked::<i64, _>(0)
+    .unwrap_or(0);
     Ok(Json(json!({
         "preshipment": preshipment,
         "date": day.format("%Y-%m-%d").to_string(),

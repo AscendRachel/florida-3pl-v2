@@ -1573,8 +1573,12 @@ export async function mount(el, params, ctx) {
     st.q = ""; st.card = ""; st.sort = ""; st.dir = "asc"; $("#q").value = "";
     st.cf = { [amzCol.i]: { c: null, v: { mode: "in", list: ["TRUE"] }, k: null }, [statusCol.i]: { c: null, v: { mode: "out", list: ["Refunded"] }, k: null } };
   }
-  // coming from the Team Daily Check List card: the Pre-shipment card of All Orders, switched on
-  if (params.get("card") === "preship") { st.q = ""; st.sort = ""; st.dir = "asc"; st.cf = {}; $("#q").value = ""; st.card = "preship"; }
+  // coming from the Team Daily Check List card: Tracking Status is Preshipment, and the Source Order Status is not For Refund, Refunded, Cancelled or Unfulfilled
+  const trackCol = cols.find((c) => c.key === "Tracking Status");
+  if (params.get("show") === "preship" && trackCol && statusCol) {
+    st.q = ""; st.card = ""; st.sort = ""; st.dir = "asc"; $("#q").value = "";
+    st.cf = { [trackCol.i]: { c: null, v: { mode: "in", list: ["Preshipment"] }, k: null }, [statusCol.i]: { c: null, v: { mode: "out", list: ["For Refund", "Refunded", "Cancelled", "Unfulfilled"] }, k: null } };
+  }
   // coming from a notification: search for that order and pick out the row (and the note's cell)
   const wantRow = +params.get("row") || 0;
   if (wantRow) { st.q = params.get("q") || ""; st.card = ""; st.sort = ""; st.dir = "asc"; st.cf = {}; $("#q").value = st.q; }
