@@ -51,7 +51,7 @@ export async function mount(el, params, ctx) {
     : [it.r.store, it.r.stock_no, it.r.sku, it.r.order_number, it.r.product, it.r.notes].join(" ")).toLowerCase();
 
   // the two stores the stock is kept for: Kohl's (every row of Kohl's Returns, and orders of a Kohl's store) and Michael's (the Citrus and Greentek orders)
-  const GROUPS = [["", "All"], ["kohls", "Kohl's"], ["michaels", "Michael's (Citrus & Greentek)"]];
+  const GROUPS = [["", "All"], ["kohls", "Kohl's"], ["michaels", "Michael's"]];
   const groupOf = (it) => {
     if (it.kind === "kohls") return "kohls";
     const s = val(it.r, "Store").trim().toLowerCase();
