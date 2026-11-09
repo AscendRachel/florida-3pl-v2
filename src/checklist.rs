@@ -26,7 +26,7 @@ const COUNTED: [(&str, &str); 7] = [
     ("P", "On this day: orders whose Tracking Status changed from In Transit to Delivered."),
 ];
 const MAX_TEXT: usize = 2000;
-const MAX_ITEMS: i64 = 300;
+const MAX_ROWS: i64 = 500; // the Additional Task and SKU columns can run this many rows down
 
 fn counted(code: &str) -> Option<&'static str> {
     COUNTED.iter().find(|(c, _)| *c == code).map(|(_, n)| *n)
@@ -248,8 +248,8 @@ pub async fn get(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Has
             v
         })
         .collect();
-    let items: Vec<(u64, String, String, String)> = sqlx::query_as("SELECT id, CAST(kind AS CHAR), `text`, updated_by FROM checklist_items ORDER BY id").fetch_all(&s.db).await?;
-    let list = |kind: &str| items.iter().filter(|i| i.1 == kind).map(|(id, _, text, by)| json!({ "id": id, "text": text, "by": by })).collect::<Vec<_>>();
+    let items: Vec<(i32, String, String, String)> = sqlx::query_as("SELECT pos, CAST(kind AS CHAR), `text`, updated_by FROM checklist_items ORDER BY pos").fetch_all(&s.db).await?;
+    let list = |kind: &str| items.iter().filter(|i| i.1 == kind).map(|(pos, _, text, by)| json!({ "pos": pos, "text": text, "by": by })).collect::<Vec<_>>();
     Ok(Json(json!({
         "date": day.format("%Y-%m-%d").to_string(),
         "today": today.format("%Y-%m-%d").to_string(),
@@ -307,33 +307,26 @@ pub async fn number(CurrentUser(_u): CurrentUser, State(s): State<AppState>, Jso
     Ok(Json(json!({ "ok": true })))
 }
 
-/// A line of the Additional Task or SKU list: add one (no id) or change one (id).
-pub async fn item(CurrentUser(u): CurrentUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+/// One cell of the Additional Task or SKU column, in the row `pos` (0 is the first row). An empty text clears the cell.
+pub async fn cell(CurrentUser(u): CurrentUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
     let kind = b.get("kind").and_then(Value::as_str).unwrap_or("");
     if kind != "additional" && kind != "sku" {
-        return Err(AppError::bad("Unknown list."));
+        return Err(AppError::bad("Unknown column."));
     }
+    let pos = b.get("pos").and_then(Value::as_i64).filter(|p| (0..MAX_ROWS).contains(p)).ok_or_else(|| AppError::bad("That row does not exist."))?;
     let text = text_of(&b, "text")?;
-    let now = clock::now();
-    let id = if let Some(id) = b.get("id").and_then(Value::as_u64) {
-        let r = sqlx::query("UPDATE checklist_items SET `text` = ?, updated_by = ?, updated_at = ? WHERE id = ?").bind(&text).bind(&u.name).bind(now).bind(id).execute(&s.db).await?;
-        if r.rows_affected() == 0 && sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM checklist_items WHERE id = ?").bind(id).fetch_one(&s.db).await? == 0 {
-            return Err(AppError::bad("That line was deleted by somebody else."));
-        }
-        id
+    if text.trim().is_empty() {
+        sqlx::query("DELETE FROM checklist_items WHERE kind = ? AND pos = ?").bind(kind).bind(pos).execute(&s.db).await?;
     } else {
-        if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM checklist_items WHERE kind = ?").bind(kind).fetch_one(&s.db).await? >= MAX_ITEMS {
-            return Err(AppError::bad("This list is full: delete some lines first."));
-        }
-        sqlx::query("INSERT INTO checklist_items (kind, `text`, updated_by, updated_at) VALUES (?,?,?,?)").bind(kind).bind(&text).bind(&u.name).bind(now).execute(&s.db).await?.last_insert_id()
-    };
-    s.bump();
-    Ok(Json(json!({ "id": id })))
-}
-
-pub async fn item_delete(CurrentUser(_u): CurrentUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
-    let id = b.get("id").and_then(Value::as_u64).unwrap_or(0);
-    sqlx::query("DELETE FROM checklist_items WHERE id = ?").bind(id).execute(&s.db).await?;
+        sqlx::query("INSERT INTO checklist_items (kind, pos, `text`, updated_by, updated_at) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE `text` = VALUES(`text`), updated_by = VALUES(updated_by), updated_at = VALUES(updated_at)")
+            .bind(kind)
+            .bind(pos)
+            .bind(&text)
+            .bind(&u.name)
+            .bind(clock::now())
+            .execute(&s.db)
+            .await?;
+    }
     s.bump();
     Ok(Json(json!({ "ok": true })))
 }

@@ -490,9 +490,7 @@ main:has(.kwrap) { max-width: 2200px; padding-left: clamp(16px, 2.5vw, 48px); pa
 .chk-legend > div { padding: 8px 18px; font-weight: 800; font-size: 20px; letter-spacing: .02em; color: #000; }
 .chk-legend .chk-head { background: #fff; }
 .chk-rule { color: #e00000; font-weight: 700; font-size: 18px; margin: 4px 0 10px; }
-.chk-wrap { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 14px; align-items: start; }
-@media (max-width: 1000px) { .chk-wrap { grid-template-columns: 1fr; } }
-.chk-table { width: 100%; border-collapse: collapse; color: #000; }
+.chk-table { width: 100%; border-collapse: collapse; color: #000; min-width: 1100px; }
 .chk-table th { background: #000; color: #fff; font-size: 17px; letter-spacing: .02em; padding: 7px 10px; text-align: center; }
 .chk-table td { border: 1px solid rgba(0, 0, 0, .35); padding: 6px 10px; color: #000; vertical-align: middle; }
 .chk-table .chk-t { font-weight: 700; min-width: 280px; }
@@ -505,10 +503,7 @@ main:has(.kwrap) { max-width: 2200px; padding-left: clamp(16px, 2.5vw, 48px); pa
 .chk-how { margin-top: 10px; }
 .chk-how summary { cursor: pointer; font-weight: 600; }
 .chk-how ul { margin: 6px 0 4px 18px; padding: 0; }
-.chk-side { display: grid; gap: 14px; }
-.chk-list .chk-head { background: #000; color: #fff; font-weight: 800; font-size: 17px; text-align: center; padding: 7px 10px; }
-.chk-list .chk-body { padding: 8px; display: grid; gap: 6px; color: #000; }
-.chk-item { display: flex; gap: 6px; align-items: flex-start; }
-.chk-item textarea { flex: 1; min-height: 30px; background: rgba(255, 255, 255, .6); border: 1px solid rgba(0, 0, 0, .25); border-radius: 4px; color: #000; padding: 5px 7px; resize: vertical; font: inherit; }
-.chk-del { border: 0; background: rgba(0, 0, 0, .12); color: #000; border-radius: 4px; width: 26px; height: 26px; cursor: pointer; font-size: 17px; line-height: 1; }
-.chk-del:hover { background: rgba(200, 0, 0, .35); }
+/* the Additional Task and SKU columns: a cell in every row, in the colours of the sheet */
+.chk-table .chk-x { min-width: 230px; padding: 3px; vertical-align: top; }
+.chk-table .chk-x textarea { font-weight: 500; }
+.chk-table .chk-blank { background: rgba(127, 127, 127, .15); }

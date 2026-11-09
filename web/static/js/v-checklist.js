@@ -12,20 +12,24 @@ export async function mount(el, params, ctx) {
   const colorOf = (agent) => data.agents.find((a) => a.agent === agent)?.color || "#ffffff";
   const busy = () => { const a = document.activeElement; return !!a && el.contains(a) && (a.tagName === "TEXTAREA" || (a.tagName === "INPUT" && a.type !== "checkbox" && a.type !== "date")); };
 
-  const taskRow = (t) => {
+  // the Additional Task and SKU columns: one editable cell in every row, kept in the row where it was typed
+  const COLUMNS = [["additional", "ADDITIONAL TASK", "#c9daf8"], ["sku", "SKU WITH MORE THAN ONE BOX", "#d9d2e9"]];
+  const cells = (i) => COLUMNS.map(([kind, , bg]) => {
+    const it = data[kind].find((x) => x.pos === i);
+    return `<td class="chk-x" style="background:${bg}"><textarea data-kind="${kind}" data-pos="${i}" rows="1" aria-label="${kind === "sku" ? "SKU" : "Additional task"} row ${i + 1}" title="${it && it.by ? "Last changed by " + esc(it.by) : ""}">${esc(it ? it.text : "")}</textarea></td>`;
+  }).join("");
+  // the rows: one per task, and below them as many as the two columns need (plus one empty one to keep going)
+  const rowCount = () => Math.max(data.tasks.length, ...COLUMNS.flatMap(([k]) => data[k].map((x) => x.pos + 2)));
+
+  const taskRow = (t, i) => {
     const bg = colorOf(t.agent);
     const boxes = FIELDS.map(([f]) => `<td class="chk-c"><input type="checkbox" data-mark="${t.code}|${f}" ${t[f] ? "checked" : ""} title="${t[f] && t[f + "_by"] ? "Ticked by " + esc(t[f + "_by"]) : "Tick when " + f}" aria-label="${f} ${t.code}"></td>`).join("");
     const num = t.counted
       ? `<td class="chk-n" title="${esc(t.how)}">${t.link && t.n != null ? `<a href="${esc(t.link)}" style="color:inherit">${fmt(t.n)}</a>` : t.n == null ? "–" : fmt(t.n)}</td>`
       : `<td class="chk-n typed"><textarea data-num="${t.code}" rows="1" placeholder="" aria-label="Numbers of ${t.code}">${esc(t.number_text)}</textarea></td>`;
-    return `<tr style="background:${bg}"><td class="chk-t"><b>${t.code}.</b> ${esc(t.title)}${ctx.isAdmin() ? ` <button class="chk-edit" data-edit="${t.code}" title="Change this task or who it is assigned to">✎</button>` : ""}</td>${boxes}${num}</tr>`;
+    return `<tr style="background:${bg}"><td class="chk-t"><b>${t.code}.</b> ${esc(t.title)}${ctx.isAdmin() ? ` <button class="chk-edit" data-edit="${t.code}" title="Change this task or who it is assigned to">✎</button>` : ""}</td>${boxes}${num}${cells(i)}</tr>`;
   };
-  const listPanel = (kind, title, bg) => {
-    const items = data[kind];
-    return `<div class="chk-list"><div class="chk-head">${esc(title)}</div><div class="chk-body" style="background:${bg}">
-      ${items.map((i) => `<div class="chk-item"><textarea data-item="${i.id}" data-kind="${kind}" rows="1" title="${i.by ? "Last changed by " + esc(i.by) : ""}">${esc(i.text)}</textarea><button class="chk-del" data-del="${i.id}" title="Delete this line" aria-label="Delete this line">×</button></div>`).join("")}
-      <button class="btn small" data-add="${kind}">+ Add a line</button></div></div>`;
-  };
+  const extraRow = (i) => `<tr class="chk-extra"><td colspan="5" class="chk-blank"></td>${cells(i)}</tr>`;
 
   const draw = () => {
     if (!data) return;
@@ -39,13 +43,10 @@ export async function mount(el, params, ctx) {
           ${day === data.today ? "" : '<button class="btn" id="today">Today</button>'}</div></div>
       <div class="chk-legend"><div class="chk-head">AGENT LEGEND</div>${data.agents.map((a) => `<div class="chk-agent" style="background:${esc(a.color)}">${esc(a.name)}</div>`).join("")}</div>
       <p class="chk-rule">Use your assigned color to identify that you're the one doing the task.</p>
-      <div class="chk-wrap">
-        <div class="chk-main tablewrap" style="max-height:none"><table class="chk-table"><thead><tr><th>DAILY TASK</th>${FIELDS.map(([, l]) => `<th>${l}</th>`).join("")}<th>NUMBERS</th></tr></thead>
-          <tbody>${data.tasks.map(taskRow).join("")}</tbody></table>
-          <details class="chk-how"><summary>How the numbers are counted</summary><ul>${data.tasks.filter((t) => t.counted).map((t) => `<li><b>${t.code}.</b> ${esc(t.how)}</li>`).join("")}</ul>
-            <p class="hint">The other tasks have a box to type in. The number of A is "right now": on an earlier day it shows what it was the last time somebody had this page open that day. The others count what happened on the selected day.</p></details></div>
-        <div class="chk-side">${listPanel("additional", "Additional Task", "#c9daf8")}${listPanel("sku", "SKU WITH MORE THAN ONE BOX", "#d9d2e9")}</div>
-      </div>`;
+      <div class="chk-main tablewrap" style="max-height:none"><table class="chk-table"><thead><tr><th>DAILY TASK</th>${FIELDS.map(([, l]) => `<th>${l}</th>`).join("")}<th>NUMBERS</th>${COLUMNS.map(([, l]) => `<th>${l}</th>`).join("")}</tr></thead>
+        <tbody>${Array.from({ length: rowCount() }, (_, i) => (data.tasks[i] ? taskRow(data.tasks[i], i) : extraRow(i))).join("")}</tbody></table></div>
+      <details class="chk-how"><summary>How the numbers are counted</summary><ul>${data.tasks.filter((t) => t.counted).map((t) => `<li><b>${t.code}.</b> ${esc(t.how)}</li>`).join("")}</ul>
+        <p class="hint">The other tasks have a box to type in. The number of A is "right now": on an earlier day it shows what it was the last time somebody had this page open that day. The others count what happened on the selected day. The Additional Task and SKU columns do not depend on the day: a cell stays until somebody clears it.</p></details>`;
     el.querySelectorAll("textarea").forEach(grow);
     if (window.scrollY !== pageTop) window.scrollTo(0, pageTop);
   };
@@ -74,10 +75,17 @@ export async function mount(el, params, ctx) {
         await api("/api/checklist/number", { date: day, task: t.dataset.num, text: t.value });
         const task = data.tasks.find((x) => x.code === t.dataset.num);
         if (task) { task.number_text = t.value; lastSig = JSON.stringify(data); }
-      } else if (t.dataset.item) {
-        await api("/api/checklist/item", { kind: t.dataset.kind, id: +t.dataset.item, text: t.value });
-        const it = data[t.dataset.kind].find((x) => x.id === +t.dataset.item);
-        if (it) { it.text = t.value; it.by = me.name; lastSig = JSON.stringify(data); }
+      } else if (t.dataset.pos) {
+        const kind = t.dataset.kind, pos = +t.dataset.pos;
+        await api("/api/checklist/cell", { kind, pos, text: t.value });
+        const list = data[kind], at = list.findIndex((x) => x.pos === pos);
+        if (!t.value.trim()) { if (at >= 0) list.splice(at, 1); }
+        else if (at >= 0) Object.assign(list[at], { text: t.value, by: me.name });
+        else list.push({ pos, text: t.value, by: me.name });
+        lastSig = JSON.stringify(data);
+        // the last row got text: one more empty row appears below it (added without redrawing, so a click on something else still lands)
+        const body = el.querySelector(".chk-table tbody");
+        for (let n = body.children.length; n < pos + 2; n++) body.insertAdjacentHTML("beforeend", extraRow(n));
       }
     } catch (err) {
       toast(err.message, "bad");
@@ -91,14 +99,7 @@ export async function mount(el, params, ctx) {
     try {
       if (b.id === "prev" || b.id === "next") { const [y, m, d] = day.split("-").map(Number); day = isoOf(new Date(y, m - 1, d + (b.id === "next" ? 1 : -1))); data = null; await load(); }
       else if (b.id === "today") { day = data.today; data = null; await load(); }
-      else if (b.dataset.add) {
-        const out = await api("/api/checklist/item", { kind: b.dataset.add, text: "" });
-        await load();
-        el.querySelector(`textarea[data-item="${out.id}"]`)?.focus();
-      } else if (b.dataset.del) {
-        await api("/api/checklist/item/delete", { id: +b.dataset.del });
-        await load();
-      } else if (b.dataset.edit) {
+      else if (b.dataset.edit) {
         const t = data.tasks.find((x) => x.code === b.dataset.edit);
         const r = await dialog({
           title: `Task ${t.code}`,
