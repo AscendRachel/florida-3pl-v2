@@ -28,12 +28,13 @@ export async function mount(el, params, ctx) {
   const label = (key) => byKey[key]?.name || key;
   const val = (r, key) => (byKey[key] ? r[byKey[key].i + 1] || "" : "");
 
-  const st = { q: "", flt: {} };
+  const st = { q: "", flt: {}, group: "" }; // group: "" = all stores, or kohls / michaels
   let items = [], shown = PAGE, menu = null, knownV = null;
   let kohlsRows = []; // the Kohl's rows, as the server sends them
 
   el.innerHTML = `<div class="section-head"><div><div class="eyebrow">${esc(brand.name)}</div><h2>Order Cards</h2></div>
       <div class="cardtabs">${cardTabs("stock")}</div></div>
+    <div class="cardtabs" id="storeTabs" style="margin:0 0 10px"></div>
     <div class="panel cardtotal"><span>STOCKS TOTAL CARDS:</span><b id="cardCount"></b></div>
     <div class="cardbar"><div class="cardfilters" id="cardFilters"></div>
       <input type="search" id="cardSearch" class="cardsearch" placeholder="Search" autocomplete="off"></div>
@@ -48,6 +49,17 @@ export async function mount(el, params, ctx) {
   const hay = (it) => (it.kind === "order"
     ? ["Label Number", "Store Order No.", "Product Name", "Customer Name", "Brand", "SKU", "STOCK NO.", "Source Order Number", "Tracking Number To Customer", "Source Tracking Number", "Notes", "Store"].map((k) => val(it.r, k)).join(" ")
     : [it.r.store, it.r.stock_no, it.r.sku, it.r.order_number, it.r.product, it.r.notes].join(" ")).toLowerCase();
+
+  // the two stores the stock is kept for: Kohl's (every row of Kohl's Returns, and orders of a Kohl's store) and Michael's (the Citrus and Greentek orders)
+  const GROUPS = [["", "All"], ["kohls", "Kohl's"], ["michaels", "Michael's (Citrus & Greentek)"]];
+  const groupOf = (it) => {
+    if (it.kind === "kohls") return "kohls";
+    const s = val(it.r, "Store").trim().toLowerCase();
+    return /^(kohl|khol)/.test(s) ? "kohls" : s === "citrus" || s === "greentek" ? "michaels" : "";
+  };
+  function drawStoreTabs() {
+    $("#storeTabs").innerHTML = GROUPS.map(([k, t]) => `<a href="#cards?tab=stock" data-group="${k}"${k === st.group ? ' class="on"' : ""}>${esc(t)} <span class="muted">${fmt(k ? items.filter((it) => groupOf(it) === k).length : items.length)}</span></a>`).join("");
+  }
 
   const numberOf = (it) => { const n = parseInt(stockNo(it), 10); return Number.isNaN(n) ? -1 : n; };
 
@@ -68,6 +80,7 @@ export async function mount(el, params, ctx) {
   const matching = (skip) => {
     const words = st.q.toLowerCase().split(/\s+/).filter(Boolean);
     return items.filter((it) => {
+      if (st.group && groupOf(it) !== st.group) return false;
       const f = facts(it);
       for (const [k, list] of Object.entries(st.flt)) if (k !== skip && list.length && !list.includes(f[k])) return false;
       return !words.length || words.every((w) => hay(it).includes(w));
@@ -184,6 +197,7 @@ export async function mount(el, params, ctx) {
     $("#cardGrid").innerHTML = rows.length ? rows.slice(0, shown).map(card).join("") : `<div class="empty">${items.length ? "No stock matches." : "No stock yet. Tick Stock on an order in All Orders, or add rows in Kohl's Returns."}</div>`;
     if (!reset) window.scrollTo(0, top);
     $("#cardCount").textContent = fmt(rows.length);
+    drawStoreTabs();
     $("#cardMore").innerHTML = shown < rows.length ? `<button class="btn" id="loadMore">Show more (${fmt(rows.length - shown)} left)</button>` : "";
   }
 
@@ -245,6 +259,8 @@ export async function mount(el, params, ctx) {
   // ---------- wiring
   el.onclick = (e) => {
     const t = e.target;
+    const g = t.closest("[data-group]");
+    if (g) { e.preventDefault(); st.group = g.dataset.group; return redraw(true); }
     const f = t.closest("[data-filter]");
     if (f) return menu ? closeMenu() : openMenu(f.dataset.filter, f);
     if (t.closest("#clearFilters")) { st.flt = {}; st.q = ""; $("#cardSearch").value = ""; drawFilters(); return redraw(true); }
