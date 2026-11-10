@@ -317,10 +317,12 @@ pub async fn admin_cards(_a: AdminUser, State(s): State<AppState>) -> AppResult<
         None => {
             let has = format!("trim({}) <> ''", c("Store Order No."));
             // the Missing Image / Missing Brand cards leave out the orders that will never ship: Cancelled and Unfulfilled
+            // the Label Link Empty card also leaves out the orders that will not ship (Cancelled, Refunded, For Refund, Unfulfilled) and the ones taken from stock
+            let shipping = format!("lower(trim({})) NOT IN ('cancelled', 'refunded', 'for refund', 'unfulfilled') AND upper(trim({})) <> 'TRUE'", c("Source Order Status"), c("Stock"));
             let live = format!("lower(trim({})) NOT IN ('cancelled', 'unfulfilled')", c("Source Order Status"));
             let sql = format!(
                 "SELECT CAST(COALESCE(SUM({has} AND {live} AND trim({img}) = ''), 0) AS SIGNED), CAST(COALESCE(SUM({has} AND {live} AND trim({brand}) = ''), 0) AS SIGNED), \
-                 CAST(COALESCE(SUM(upper(trim({tv})) = 'TRUE' AND upper(trim({lv})) <> 'TRUE'), 0) AS SIGNED), CAST(COALESCE(SUM({has} AND trim({link}) = ''), 0) AS SIGNED), \
+                 CAST(COALESCE(SUM(upper(trim({tv})) = 'TRUE' AND upper(trim({lv})) <> 'TRUE'), 0) AS SIGNED), CAST(COALESCE(SUM({has} AND {shipping} AND trim({link}) = ''), 0) AS SIGNED), \
                  CAST(COALESCE(SUM(upper(trim({sa})) = 'TRUE' AND lower(trim({st})) <> 'refunded'), 0) AS SIGNED) FROM orders_text",
                 img = c("Product Image Link"), brand = c("Brand"), tv = c("To Void"), lv = c("Label Voided"), link = c("Shipping Label Link"), sa = c("Shipped to Amazon"), st = c("Source Order Status")
             );
@@ -339,7 +341,7 @@ pub async fn admin_cards(_a: AdminUser, State(s): State<AppState>) -> AppResult<
     out.push(json!({ "key": "tovoid", "label": "To Void, Label Not Yet Voided", "n": counts[2], "note": "To Void is checked, Label Voided is not", "link": "#orders?show=tovoid" }));
     out.push(json!({ "key": "dupusps", "label": "USPS Tracking Duplicate", "n": counts[5], "note": "rows sharing a Tracking Number To Customer", "link": "#orders?show=dupusps" }));
     out.push(json!({ "key": "duplabel", "label": "Label Link Duplicate", "n": counts[6], "note": "rows sharing a Shipping Label Link", "link": "#orders?show=duplabel" }));
-    out.push(json!({ "key": "nolabel", "label": "Label Link Empty", "n": counts[3], "note": "orders with no Shipping Label Link", "link": "#orders?blank=Shipping%20Label%20Link" }));
+    out.push(json!({ "key": "nolabel", "label": "Label Link Empty", "n": counts[3], "note": "orders with no Shipping Label Link, leaving out Cancelled, Refunded, For Refund, Unfulfilled and Stock", "link": "#orders?blank=Shipping%20Label%20Link&notstatus=Cancelled,Refunded,For%20Refund,Unfulfilled&notstock=1" }));
     let pending = counts[4];
     let a = label_audit(&s).await?;
     let rd = &a["reading"];

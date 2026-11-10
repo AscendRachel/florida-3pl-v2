@@ -1560,6 +1560,9 @@ export async function mount(el, params, ctx) {
     // the Missing Image / Missing Brand cards leave out some Source Order Statuses (Cancelled, Unfulfilled)
     const skip = (params.get("notstatus") || "").split(",").filter(Boolean), srcStatus = cols.find((c) => c.key === "Source Order Status");
     if (skip.length && srcStatus) st.cf[srcStatus.i] = { c: null, v: { mode: "out", list: skip }, k: null };
+    // the Label Link Empty card also leaves out the orders taken from stock (Stock ticked)
+    const stockCol = cols.find((c) => c.key === "Stock");
+    if (params.get("notstock") && stockCol) st.cf[stockCol.i] = { c: null, v: { mode: "out", list: ["TRUE"] }, k: null };
   }
   // coming from the Admin card of labels to void: To Void is checked and Label Voided is not
   const voidCol = cols.find((c) => c.key === "To Void"), voidedCol = cols.find((c) => c.key === "Label Voided");
