@@ -2,8 +2,6 @@
 //! the numbers the app counts by itself (tasks A, B, D, E, F, G, H, I, O and P; the other tasks are typed), and the two free lists beside it.
 
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
-use std::time::{Duration as StdDuration, Instant};
 
 use axum::extract::{Query, State};
 use axum::response::Json;
@@ -17,7 +15,7 @@ use crate::{clock, AppState};
 
 /// The tasks whose number the app counts, and how (shown on the page when the number is hovered).
 const COUNTED: [(&str, &str); 10] = [
-    ("A", "Right now: orders with a Source Order Number and no Source Tracking Number, whose status is not Delivered, Cancelled, Refunded or For Refund."),
+    ("A", "On this day: orders whose empty Source Tracking Number was filled in (by hand or by an Amazon order import)."),
     ("B", "On this day: orders whose Source Order Status changed from In Transit to Delivered, plus the orders an Amazon order import changed to Delivered."),
     ("D", "On this day: orders that were ticked Package Not Received."),
     ("E", "On this day: orange rows (Package Not Received ticked) whose Source Order Status was changed to Refunded."),
@@ -40,37 +38,6 @@ fn parse_day(v: Option<&str>) -> AppResult<NaiveDate> {
         Some(d) => NaiveDate::parse_from_str(d, "%Y-%m-%d").map_err(|_| AppError::bad("Pick a date.")),
         None => Ok(clock::now().date()),
     }
-}
-
-type Backlog = HashMap<&'static str, i64>;
-static BACKLOG: LazyLock<Mutex<Option<(u64, Instant, Backlog)>>> = LazyLock::new(|| Mutex::new(None));
-
-/// The one number that is "right now": A. Kept for 20 seconds (and until something changes), and written down as the
-/// number of today, so a past day still shows what it was the last time somebody looked.
-async fn backlog(s: &AppState) -> AppResult<Backlog> {
-    let v = s.version_now();
-    if let Some((ver, at, b)) = BACKLOG.lock().unwrap().as_ref() {
-        if *ver == v && at.elapsed() < StdDuration::from_secs(20) {
-            return Ok(b.clone());
-        }
-    }
-    let sch = s.schema();
-    let c = |h: &str| sch.c(h);
-    let a = sqlx::query(&format!(
-        "SELECT COUNT(*) FROM orders_text WHERE trim({}) <> '' AND trim({}) = '' AND lower(trim({})) NOT IN ('delivered', 'cancelled', 'refunded', 'for refund')",
-        c("Source Order Number"), c("Source Tracking Number"), c("Source Order Status")
-    ))
-    .fetch_one(&s.db)
-    .await?
-    .try_get_unchecked::<i64, _>(0)
-    .unwrap_or(0);
-    let b: Backlog = HashMap::from([("A", a)]);
-    let today = clock::now().date();
-    for (k, n) in &b {
-        sqlx::query("INSERT INTO checklist_counts (day, task, n) VALUES (?,?,?) ON DUPLICATE KEY UPDATE n = VALUES(n)").bind(today).bind(*k).bind(*n).execute(&s.db).await?;
-    }
-    *BACKLOG.lock().unwrap() = Some((v, Instant::now(), b.clone()));
-    Ok(b)
 }
 
 // ---- rows that left red / magenta
@@ -193,6 +160,21 @@ async fn blanks_filled(s: &AppState, day: NaiveDate) -> AppResult<i64> {
     .unwrap_or(0))
 }
 
+/// Task A: how many orders had an empty Source Tracking Number filled in on that day (by hand or by an Amazon order import).
+async fn tracking_filled(s: &AppState, day: NaiveDate) -> AppResult<i64> {
+    let start = day.and_hms_opt(0, 0, 0).unwrap_or_default();
+    let end = start + Duration::days(1);
+    Ok(sqlx::query(
+        "SELECT COUNT(DISTINCT rn) FROM edit_log WHERE at >= ? AND at < ? AND field = 'source_tracking_number' AND trim(IFNULL(old_value, '')) = '' AND trim(IFNULL(new_value, '')) <> '' AND note <> 'Row added'",
+    )
+    .bind(start)
+    .bind(end)
+    .fetch_one(&s.db)
+    .await?
+    .try_get_unchecked::<i64, _>(0)
+    .unwrap_or(0))
+}
+
 /// How many orders had this cell change on that day (old value -> new value; `old` None = "was not already TRUE").
 async fn changes(s: &AppState, day: NaiveDate, field: &str, old: Option<&str>, new: &str) -> AppResult<i64> {
     let start = day.and_hms_opt(0, 0, 0).unwrap_or_default();
@@ -259,12 +241,7 @@ pub async fn get(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Has
     }
     // the counted numbers
     let mut n: HashMap<&str, Option<i64>> = HashMap::new();
-    if day == today {
-        n.insert("A", backlog(&s).await?.get("A").copied());
-    } else {
-        let a: Option<i64> = sqlx::query_scalar("SELECT n FROM checklist_counts WHERE day = ? AND task = 'A'").bind(day).fetch_optional(&s.db).await?;
-        n.insert("A", a);
-    }
+    n.insert("A", Some(tracking_filled(&s, day).await?));
     n.insert("B", Some(status_delivered(&s, day).await?));
     n.insert("D", Some(changes(&s, day, "package_not_received", None, "TRUE").await?));
     n.insert("E", Some(status_to(&s, day, None, "Refunded", true).await?));

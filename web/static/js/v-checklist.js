@@ -48,7 +48,7 @@ export async function mount(el, params, ctx) {
       <div class="chk-main tablewrap" style="max-height:none"><table class="chk-table"><thead><tr><th>DAILY TASK</th>${FIELDS.map(([, l]) => `<th>${l}</th>`).join("")}<th>NUMBERS</th>${COLUMNS.map(([, l]) => `<th>${l}</th>`).join("")}</tr></thead>
         <tbody>${Array.from({ length: rowCount() }, (_, i) => (data.tasks[i] ? taskRow(data.tasks[i], i) : extraRow(i))).join("")}</tbody></table></div>
       <details class="chk-how"><summary>How the numbers are counted</summary><ul>${data.tasks.filter((t) => t.counted).map((t) => `<li><b>${t.code}.</b> ${esc(t.how)}</li>`).join("")}</ul>
-        <p class="hint">The other tasks have a box to type in. The number of A is "right now": on an earlier day it shows what it was the last time somebody had this page open that day. The others count what happened on the selected day. The Additional Task and SKU columns do not depend on the day: a cell stays until somebody clears it.</p></details>`;
+        <p class="hint">The other tasks have a box to type in. The numbers count what happened on the selected day. The Additional Task and SKU columns do not depend on the day: a cell stays until somebody clears it.</p></details>`;
     el.querySelectorAll("textarea").forEach(grow);
     if (window.scrollY !== pageTop) window.scrollTo(0, pageTop);
   };
