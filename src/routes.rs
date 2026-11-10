@@ -73,6 +73,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/checklist/number", post(crate::checklist::number))
         .route("/api/checklist/cell", post(crate::checklist::cell))
         .route("/api/checklist/task", post(crate::checklist::task_edit))
+        .route("/api/checklist/agents", post(crate::checklist::agents_edit))
         .route("/api/materials", get(crate::returns::materials_get))
         .route("/api/materials/:action", post(crate::returns::materials_post))
         .route("/api/kohls", get(crate::returns::kohls_get))

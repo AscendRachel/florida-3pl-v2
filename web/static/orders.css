@@ -499,6 +499,7 @@ main:has(.kwrap) { max-width: 2200px; padding-left: clamp(16px, 2.5vw, 48px); pa
 .chk-table .chk-n { min-width: 150px; text-align: center; font-weight: 700; }
 .chk-table .typed { text-align: left; padding: 3px; }
 .chk-table textarea { width: 100%; min-height: 28px; background: rgba(255, 255, 255, .55); border: 1px solid rgba(0, 0, 0, .3); border-radius: 4px; color: #000; padding: 4px 6px; resize: vertical; font: inherit; font-weight: 600; }
+.chk-legend .chk-legend-edit { background: #fff; padding: 8px 10px; display: grid; place-items: center; }
 .chk-edit { border: 0; background: rgba(255, 255, 255, .6); border-radius: 4px; cursor: pointer; font-size: 13px; padding: 0 5px; color: #000; }
 .chk-how { margin-top: 10px; }
 .chk-how summary { cursor: pointer; font-weight: 600; }

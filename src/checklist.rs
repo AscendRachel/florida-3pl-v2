@@ -392,6 +392,31 @@ pub async fn cell(CurrentUser(u): CurrentUser, State(s): State<AppState>, Json(b
     Ok(Json(json!({ "ok": true })))
 }
 
+/// An admin changes the name and the colour of the agents of the legend: {agents: [{agent, name, color}]}.
+pub async fn agents_edit(AdminUser(_u): AdminUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+    let list = b.get("agents").and_then(Value::as_array).ok_or_else(|| AppError::bad("Nothing to save."))?;
+    let mut rows: Vec<(String, String, String)> = vec![];
+    for a in list {
+        let key = a.get("agent").and_then(Value::as_str).unwrap_or("");
+        let name = a.get("name").and_then(Value::as_str).unwrap_or("").trim().to_string();
+        let color = a.get("color").and_then(Value::as_str).unwrap_or("").trim().to_lowercase();
+        if name.is_empty() || name.chars().count() > 60 {
+            return Err(AppError::bad("Write a name for each agent (at most 60 characters)."));
+        }
+        if color.len() != 7 || !color.starts_with('#') || !color[1..].chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(AppError::bad("Pick a colour for each agent."));
+        }
+        rows.push((key.to_string(), name, color));
+    }
+    let mut tx = s.db.begin().await?;
+    for (key, name, color) in &rows {
+        sqlx::query("UPDATE checklist_agents SET name = ?, color = ? WHERE agent = ?").bind(name).bind(color).bind(key).execute(&mut *tx).await?;
+    }
+    tx.commit().await?;
+    s.bump();
+    Ok(Json(json!({ "ok": true })))
+}
+
 /// An admin changes the words of a task, or who it is assigned to (its colour).
 pub async fn task_edit(AdminUser(_u): AdminUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
     let code = b.get("code").and_then(Value::as_str).unwrap_or("");

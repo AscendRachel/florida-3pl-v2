@@ -43,7 +43,7 @@ export async function mount(el, params, ctx) {
           ${day === data.today ? "" : '<button class="btn" id="today">Today</button>'}</div></div>
       <div class="dash-cards" style="margin-bottom:12px"><a class="scard warn dash-card" href="#orders?show=preship" title="Show these orders in All Orders" style="text-decoration:none;color:inherit"><div class="dash-n">${fmt(data.preshipment)}</div>
         <div class="dash-l">Total Preshipment<div class="muted">Tracking Status is Preshipment, leaving out For Refund, Refunded, Cancelled, Unfulfilled, empty rows (no Store Order No.), and the ones ticked To Void or Package Not Received</div></div></a></div>
-      <div class="chk-legend"><div class="chk-head">AGENT LEGEND</div>${data.agents.map((a) => `<div class="chk-agent" style="background:${esc(a.color)}">${esc(a.name)}</div>`).join("")}</div>
+      <div class="chk-legend"><div class="chk-head">AGENT LEGEND</div>${data.agents.map((a) => `<div class="chk-agent" style="background:${esc(a.color)}">${esc(a.name)}</div>`).join("")}${ctx.isAdmin() ? `<div class="chk-agent chk-legend-edit"><button class="chk-edit" id="editAgents" title="Change the names and colours of the agents">✎</button></div>` : ""}</div>
       <p class="chk-rule">Use your assigned color to identify that you're the one doing the task.</p>
       <div class="chk-main tablewrap" style="max-height:none"><table class="chk-table"><thead><tr><th>DAILY TASK</th>${FIELDS.map(([, l]) => `<th>${l}</th>`).join("")}<th>NUMBERS</th>${COLUMNS.map(([, l]) => `<th>${l}</th>`).join("")}</tr></thead>
         <tbody>${Array.from({ length: rowCount() }, (_, i) => (data.tasks[i] ? taskRow(data.tasks[i], i) : extraRow(i))).join("")}</tbody></table></div>
@@ -101,6 +101,22 @@ export async function mount(el, params, ctx) {
     try {
       if (b.id === "prev" || b.id === "next") { const [y, m, d] = day.split("-").map(Number); day = isoOf(new Date(y, m - 1, d + (b.id === "next" ? 1 : -1))); data = null; await load(); }
       else if (b.id === "today") { day = data.today; data = null; await load(); }
+      else if (b.id === "editAgents") {
+        const r = await dialog({
+          title: "Agent legend",
+          body: data.agents.map((a) => `<div class="field" style="display:flex;gap:10px;align-items:center;margin:0 0 8px"><input type="color" data-agent-color="${esc(a.agent)}" value="${esc(a.color)}" aria-label="Colour of ${esc(a.name)}" style="width:48px;height:34px;padding:0;flex:none"><input type="text" data-agent-name="${esc(a.agent)}" value="${esc(a.name)}" maxlength="60" aria-label="Name" style="flex:1"></div>`).join(""),
+          actions: [["Cancel", "close"], ["Save", "ok", "primary"]],
+        });
+        if (r.value !== "ok") return;
+        const agents = data.agents.map((a) => ({
+          agent: a.agent,
+          name: r.el.querySelector(`[data-agent-name="${a.agent}"]`).value,
+          color: r.el.querySelector(`[data-agent-color="${a.agent}"]`).value,
+        }));
+        await api("/api/checklist/agents", { agents });
+        toast("Saved.");
+        await load();
+      }
       else if (b.dataset.edit) {
         const t = data.tasks.find((x) => x.code === b.dataset.edit);
         const r = await dialog({
