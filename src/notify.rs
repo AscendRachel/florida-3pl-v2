@@ -91,7 +91,7 @@ pub async fn feed(CurrentUser(u): CurrentUser, State(s): State<AppState>) -> App
         })
         .collect();
     let unread: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE by_user <> ? AND id > ?").bind(&u.username).bind(last).fetch_one(&s.db).await?;
-    Ok(Json(json!({ "items": items, "unread": unread, "can_orders": can_orders })))
+    Ok(Json(json!({ "items": items, "unread": unread, "can_orders": can_orders && !(u.role == "warehouse" && can_cards) })))
 }
 
 pub async fn seen(CurrentUser(u): CurrentUser, State(s): State<AppState>) -> AppResult<Json<Value>> {
