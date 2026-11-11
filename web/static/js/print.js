@@ -30,7 +30,11 @@ export async function labelPages(url) {
   const pages = [];
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
-    const size = page.getViewport({ scale: 1 }), vp = page.getViewport({ scale: 300 / 72 }); // 300 dpi
+    const size = page.getViewport({ scale: 1 });
+    // Some labels (the return labels) come as a small page, about 2 x 3 inches. The printer paper is 4 x 6, so such a page is
+    // enlarged to 4 inches wide (same shape), otherwise the browser shrinks it into the middle of the paper and adds its header and footer.
+    const grow = size.width < 3.9 * 72 ? (4 * 72) / size.width : 1;
+    const vp = page.getViewport({ scale: (300 / 72) * grow }); // 300 dpi
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(vp.width);
     canvas.height = Math.round(vp.height);
@@ -39,7 +43,7 @@ export async function labelPages(url) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     // intent "print" draws without waiting for animation frames, so it also works when the tab is in the background
     await page.render({ canvasContext: ctx, viewport: vp, intent: "print" }).promise;
-    pages.push({ img: canvas.toDataURL("image/png"), wIn: size.width / 72, hIn: size.height / 72 });
+    pages.push({ img: canvas.toDataURL("image/png"), wIn: (size.width * grow) / 72, hIn: (size.height * grow) / 72 });
   }
   return pages;
 }
