@@ -179,6 +179,17 @@ pub fn build_where(schema: &Schema, p: &Value, skip: Option<usize>) -> AppResult
         where_.push("_s LIKE ?".to_string());
         args.push(Arg::S(format!("%{term}%")));
     }
+    // the Team Daily Check List card "Estimated Delivery Changed": the orders whose Delivery Date was moved to another date on that day
+    // (the same rule as the card's count in checklist.rs)
+    if let Ok(day) = NaiveDate::parse_from_str(&st(p, "etaday"), "%Y-%m-%d") {
+        let start = day.and_hms_opt(0, 0, 0).unwrap_or_default();
+        where_.push(
+            "rn IN (SELECT rn FROM edit_log WHERE at >= ? AND at < ? AND field = 'delivery_date' AND trim(IFNULL(old_value, '')) <> ''              AND substr(trim(IFNULL(old_value, '')), 1, 10) <> substr(trim(IFNULL(new_value, '')), 1, 10) AND note <> 'Row added')"
+                .to_string(),
+        );
+        args.push(Arg::S(start.format("%Y-%m-%d %H:%M:%S").to_string()));
+        args.push(Arg::S((start + Duration::days(1)).format("%Y-%m-%d %H:%M:%S").to_string()));
+    }
     let card = st(p, "card");
     for (key, _, _, _, col, val) in CARDS {
         if key == card {
