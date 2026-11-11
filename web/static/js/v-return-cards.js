@@ -140,6 +140,7 @@ export async function mount(el, params, ctx) {
     const r = data.rows.find((x) => x.rid === rid);
     if (!r) return;
     const res = await dialog({
+      enterSaves: true,
       title: `${r.rid} · ${r.customer}`,
       wide: true,
       body: `<label class="field"><span>${esc(L("wh_notes", "WAREHOUSE NOTES"))}</span><textarea name="wh_notes" rows="3">${esc(r.wh_notes)}</textarea></label>

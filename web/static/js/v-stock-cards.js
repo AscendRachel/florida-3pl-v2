@@ -205,6 +205,7 @@ export async function mount(el, params, ctx) {
   async function editOrder(it) {
     const r = it.r, cur = (k) => val(r, k);
     const res = await dialog({
+      enterSaves: true,
       title: "Update record",
       body: `<label class="field"><span>Add Notes:</span><textarea name="Notes" rows="2">${esc(cur("Notes"))}</textarea></label>
         <label class="field"><span>${esc(label("STOCK NO."))} *</span><input name="stock" value="${esc(cur("STOCK NO."))}" required autocomplete="off"></label>
@@ -231,6 +232,7 @@ export async function mount(el, params, ctx) {
   async function editKohls(it) {
     const r = it.r;
     const res = await dialog({
+      enterSaves: true,
       title: "Update record",
       body: `<label class="field"><span>Add Notes:</span><textarea name="notes" rows="2">${esc(r.notes)}</textarea></label>
         <label class="field"><span>STOCK NO. *</span><input name="stock_no" value="${esc(r.stock_no)}" required autocomplete="off"></label>

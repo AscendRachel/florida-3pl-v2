@@ -202,6 +202,7 @@ export async function mount(el, params, ctx) {
     // All Orders: no Stock (it is ticked in All Orders, the sheet); Item on Hold keeps every box.
     const bools = rts || rta ? [...BOOLS.filter((k) => k !== "Shipped to Customer" && k !== "Stock"), "Package Not Received"] : hold ? BOOLS : BOOLS.filter((k) => k !== "Stock");
     const res = await dialog({
+      enterSaves: true,
       title: `${cur("Label Number")} · ${cur("Customer Name")}`,
       wide: true,
       body: `<label class="field"><span>${esc(label("Notes"))}</span><textarea name="Notes" rows="3">${esc(cur("Notes"))}</textarea></label>

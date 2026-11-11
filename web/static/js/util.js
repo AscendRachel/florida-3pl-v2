@@ -90,7 +90,7 @@ export function toast(msg, kind = "") {
 }
 
 // ---- modal dialog: returns a promise resolved with the button value
-export function dialog({ title, body, actions = [["Close", "close"]], wide = false }) {
+export function dialog({ title, body, actions = [["Close", "close"]], wide = false, enterSaves = false }) {
   return new Promise((resolve) => {
     const dlg = document.createElement("dialog");
     dlg.className = "modal" + (wide ? " wide" : "");
@@ -102,6 +102,12 @@ export function dialog({ title, body, actions = [["Close", "close"]], wide = fal
       const result = { value: dlg.returnValue, el: dlg };
       resolve(result);
       setTimeout(() => dlg.remove(), 0);
+    });
+    // enterSaves: Enter in a text box presses the main button (Shift+Enter still starts a new line in a note)
+    if (enterSaves) dlg.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || e.shiftKey || e.isComposing || !e.target.matches("input:not([type=checkbox]):not([type=button]), textarea")) return;
+      e.preventDefault();
+      dlg.querySelector("button.primary")?.click();
     });
     document.body.append(dlg);
     dlg.showModal();
