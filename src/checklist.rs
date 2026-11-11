@@ -287,8 +287,20 @@ pub async fn get(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Has
     .await?
     .try_get_unchecked::<i64, _>(0)
     .unwrap_or(0);
+    // the card of the orders still waiting for a tracking number: a Source Order Number and no Source Tracking Number
+    // (compared as All Orders' "is empty" / "is not empty" filters do, so the list it opens has the same count)
+    let no_tracking = sqlx::query(&format!(
+        "SELECT COUNT(*) FROM orders_text WHERE {} <> '' AND {} = ''",
+        sch.c("Source Order Number"),
+        sch.c("Source Tracking Number")
+    ))
+    .fetch_one(&s.db)
+    .await?
+    .try_get_unchecked::<i64, _>(0)
+    .unwrap_or(0);
     Ok(Json(json!({
         "preshipment": preshipment,
+        "no_tracking": no_tracking,
         "date": day.format("%Y-%m-%d").to_string(),
         "today": today.format("%Y-%m-%d").to_string(),
         "agents": agents.into_iter().map(|(agent, name, color)| json!({ "agent": agent, "name": name, "color": color })).collect::<Vec<_>>(),
