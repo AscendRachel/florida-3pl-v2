@@ -1,0 +1,42 @@
+# Builds the app's Docker image on GitHub and pushes it to Docker Hub every time code is pushed to main.
+# The server then gets it the usual way: docker compose -f docker-compose.server.yml pull app
+#
+# Needs two repository secrets (GitHub > Settings > Secrets and variables > Actions):
+#   DOCKERHUB_USERNAME  the Docker Hub user name (ascendrachel)
+#   DOCKERHUB_TOKEN     a Docker Hub access token with Read & Write permission
+name: Docker Image
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md"] # a change to the notes only does not need a new image
+  workflow_dispatch: # the "Run workflow" button on the Actions page
+
+concurrency:
+  group: docker-image
+  cancel-in-progress: true # two pushes close together: only the newest one is built
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ascendrachel/florida-3pl-v2:latest
+            ascendrachel/florida-3pl-v2:2.0.0-dev
+            ascendrachel/florida-3pl-v2:${{ github.sha }}
+          # keeps the compiled pieces between builds, so the next build is much faster
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
