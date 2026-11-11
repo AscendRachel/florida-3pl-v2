@@ -198,8 +198,9 @@ export async function mount(el, params, ctx) {
     const r = rows[n];
     if (!r) return;
     const cur = (k) => val(r, k);
-    // Return to Sender and Return to Amazon: no Shipped to Customer and no Stock; Package Not Received instead
-    const bools = rts || rta ? [...BOOLS.filter((k) => k !== "Shipped to Customer" && k !== "Stock"), "Package Not Received"] : BOOLS;
+    // Return to Sender and Return to Amazon: no Shipped to Customer and no Stock; Package Not Received instead.
+    // All Orders: no Stock (it is ticked in All Orders, the sheet); Item on Hold keeps every box.
+    const bools = rts || rta ? [...BOOLS.filter((k) => k !== "Shipped to Customer" && k !== "Stock"), "Package Not Received"] : hold ? BOOLS : BOOLS.filter((k) => k !== "Stock");
     const res = await dialog({
       title: `${cur("Label Number")} · ${cur("Customer Name")}`,
       wide: true,
