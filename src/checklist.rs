@@ -175,6 +175,21 @@ async fn tracking_filled(s: &AppState, day: NaiveDate) -> AppResult<i64> {
     .unwrap_or(0))
 }
 
+/// The card of the day: how many orders had an estimated Delivery Date that was changed on that day (it had a date and now has another one, by hand or by an Amazon order import).
+async fn eta_changed(s: &AppState, day: NaiveDate) -> AppResult<i64> {
+    let start = day.and_hms_opt(0, 0, 0).unwrap_or_default();
+    let end = start + Duration::days(1);
+    Ok(sqlx::query(
+        "SELECT COUNT(DISTINCT rn) FROM edit_log WHERE at >= ? AND at < ? AND field = 'delivery_date' AND trim(IFNULL(old_value, '')) <> ''          AND substr(trim(IFNULL(old_value, '')), 1, 10) <> substr(trim(IFNULL(new_value, '')), 1, 10) AND note <> 'Row added'",
+    )
+    .bind(start)
+    .bind(end)
+    .fetch_one(&s.db)
+    .await?
+    .try_get_unchecked::<i64, _>(0)
+    .unwrap_or(0))
+}
+
 /// How many orders had this cell change on that day (old value -> new value; `old` None = "was not already TRUE").
 async fn changes(s: &AppState, day: NaiveDate, field: &str, old: Option<&str>, new: &str) -> AppResult<i64> {
     let start = day.and_hms_opt(0, 0, 0).unwrap_or_default();
@@ -303,6 +318,7 @@ pub async fn get(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Has
     Ok(Json(json!({
         "preshipment": preshipment,
         "no_tracking": no_tracking,
+        "eta_changed": eta_changed(&s, day).await?,
         "date": day.format("%Y-%m-%d").to_string(),
         "today": today.format("%Y-%m-%d").to_string(),
         "agents": agents.into_iter().map(|(agent, name, color)| json!({ "agent": agent, "name": name, "color": color })).collect::<Vec<_>>(),

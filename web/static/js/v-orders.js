@@ -1295,7 +1295,7 @@ export async function mount(el, params, ctx) {
       ? `<div style="max-height:380px;overflow:auto"><table style="min-width:0"><thead><tr><th>When</th><th>Who</th><th>Changed</th></tr></thead><tbody>
           ${h.events.map((ev) => `<tr><td style="white-space:nowrap" title="${esc(ev.at)}">${esc(ago(ev.at))}<div class="muted" style="font-size:12px">${esc(ev.at)}</div></td>
             <td><b>${esc(ev.who)}</b></td><td>${val(ev.old)} <span class="muted">→</span> ${val(ev.new)}${ev.note ? `<div class="muted" style="font-size:12px">${esc(ev.note)}</div>` : ""}</td></tr>`).join("")}</tbody></table></div>
-         <p class="hint">Edits and scans are listed with the person's name. Changes made by an import are not listed cell by cell.</p>`
+         <p class="hint">Edits, scans and Amazon order imports are listed (an import shows the note "Amazon import"). The big sheet import is not listed cell by cell.</p>`
       : `<p class="muted">No changes recorded for this cell yet. Edits and scans from now on show here, with who made them.</p>`;
     await dialog({ title: `Edit history · ${row[cellCol("Label Number")] || row[0]} · ${c.name}`, body, wide: true, actions: [["Close", "close", "primary"]] });
     sc.focus({ preventScroll: true });
