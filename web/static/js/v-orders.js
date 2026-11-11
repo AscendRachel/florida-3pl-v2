@@ -1598,11 +1598,12 @@ export async function mount(el, params, ctx) {
       [notRecCol.i]: { c: null, v: { mode: "out", list: ["TRUE"] }, k: null },
     };
   }
-  // coming from the Team Daily Check List card: orders with a Source Order Number and no Source Tracking Number
+  // coming from the Team Daily Check List card: orders with a Source Order Number and no Source Tracking Number, not Delivered, Cancelled, Refunded, For Refund or Unfulfilled
   const srcNoCol = cols.find((c) => c.key === "Source Order Number"), srcTrkCol = cols.find((c) => c.key === "Source Tracking Number");
   if (params.get("show") === "notracking" && srcNoCol && srcTrkCol) {
     st.q = ""; st.card = ""; st.sort = ""; st.dir = "asc"; $("#q").value = "";
     st.cf = { [srcNoCol.i]: { c: { op: "notempty", a: "", b: "" }, v: null, k: null }, [srcTrkCol.i]: { c: { op: "empty", a: "", b: "" }, v: null, k: null } };
+    if (statusCol) st.cf[statusCol.i] = { c: null, v: { mode: "out", list: ["Delivered", "Cancelled", "Refunded", "For Refund", "Unfulfilled"] }, k: null };
   }
   // coming from a notification: search for that order and pick out the row (and the note's cell)
   const wantRow = +params.get("row") || 0;
