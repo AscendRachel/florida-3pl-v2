@@ -101,6 +101,7 @@
 .sc-top { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .sc-title { font-size: 15px; padding: 4px 14px; letter-spacing: .02em; }
 .scard h3 { font-size: 17px; line-height: 1.3; }
+.sc-store { margin: 2px 0 4px; font-size: 16px; }
 .sc-msg { margin: 4px 0 0; font-size: 15px; font-weight: 500; }
 .sc-warn { margin: 4px 0 0; padding: 6px 10px; }
 .sc-print { margin-top: 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

@@ -75,6 +75,7 @@ export async function mount(el, params, ctx) {
         <div class="sc-top"><span class="pill ${PILL[r.tone]} sc-title">${esc(r.title)}</span>
           ${b ? `<span class="pill s-neutral">Box ${b.received} of ${b.expected}</span>` : ""}${r.items && r.items.qty > 1 ? `<span class="pill s-neutral">Items ${r.items.received} of ${r.items.qty}</span>` : ""}${r.duplicate ? `<span class="pill s-info">Box already counted</span>` : ""}</div>
         <h3>${esc(r.product || "(no product name)")}</h3>
+        ${r.store ? `<div class="sc-store"><span class="muted">Store:</span> <b>${esc(r.store)}</b></div>` : ""}
         <div class="muted">${esc([r.brand, r.qty && `Qty ${r.qty}`, r.customer].filter(Boolean).join(" · "))}</div>
         <div class="muted mono">${esc(r.label)} · ${esc(r.store_order)} · ${esc(r.source_order)}</div>
         <p class="sc-msg">${esc(r.message)}</p>
@@ -249,7 +250,7 @@ export async function mount(el, params, ctx) {
         show(lastRes);
         window.scrollTo({ top: 0, behavior: "smooth" });
       } catch (err) { toast(err.message, "bad"); }
-    } else if (!t.closest("input, button, select, textarea, a, label, dialog")) {
+    } else if (!t.closest("input, button, select, textarea, a, label, dialog") && !String(getSelection()).trim()) { // keep text the operator just highlighted
       $("#scan").focus();
     }
   };
