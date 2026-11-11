@@ -29,7 +29,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 use sqlx::Row;
 
-use crate::auth::AdminUser;
+use crate::auth::CurrentUser;
 use crate::error::{AppError, AppResult};
 use crate::orders_write::{delivered_cleanup, orders_set, read_text, refresh_search};
 use crate::AppState;
@@ -432,7 +432,8 @@ pub fn build_plan(rows: &[OrderRow], lines: &[Line]) -> Plan {
 // ---------------------------------------------------------------- the web side
 
 /// Read the Amazon orders file (raw request body) and show what importing it would change. Nothing is written yet.
-pub async fn preview(_a: AdminUser, State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> AppResult<Json<Value>> {
+pub async fn preview(CurrentUser(_a): CurrentUser, State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> AppResult<Json<Value>> {
+    crate::auth::need_tab(&_a, "amazon")?;
     if body.is_empty() {
         return Err(AppError::bad("The file is empty."));
     }
@@ -492,7 +493,8 @@ pub fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-pub async fn apply(AdminUser(me): AdminUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+pub async fn apply(CurrentUser(me): CurrentUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+    crate::auth::need_tab(&me, "amazon")?;
     let token = b.get("token").and_then(Value::as_str).unwrap_or("").to_string();
     let plan = s.amazon_plans.lock().unwrap().get(&token).map(|(_, p)| p.clone());
     let Some(plan) = plan else { return Err(AppError::bad("That preview has expired. Choose the file again.")) };

@@ -2,9 +2,11 @@
 import { applyBranding } from "./branding.js";
 import { api, brand, confirmBox, dialog, esc, toast } from "./util.js";
 
-const TAB_LIST = [["dashboard", "Dashboard"], ["scan", "Scan"], ["cards", "Order Cards"], ["orders", "All Orders"], ["returns", "Returns"], ["materials", "Materials"], ["checklist", "Team Daily Check List"]];
+const TAB_LIST = [["dashboard", "Dashboard"], ["scan", "Scan"], ["cards", "Order Cards"], ["orders", "All Orders"], ["returns", "Returns"], ["materials", "Materials"], ["checklist", "Team Daily Check List"],
+  ["worklog", "Work Log"], ["amazon", "Amazon Orders"], ["import", "Import"], ["team", "Team"], ["admin", "Admin"]];
+const ADMIN_TABS = ["worklog", "amazon", "import", "team", "admin"]; // only when ticked: a member with no list does not get these
 const tabBoxes = (on) => `<fieldset class="tabpick" style="border:1px solid var(--line,#ccc);border-radius:8px;padding:8px 12px;margin:0 0 10px"><legend>Tabs this person can see</legend>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px">${TAB_LIST.map(([k, l]) => `<label class="check"><input type="checkbox" name="tab" value="${k}" ${!on || on.includes(k) ? "checked" : ""}> ${l}</label>`).join("")}</div></fieldset>`;
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px">${TAB_LIST.map(([k, l]) => `<label class="check"><input type="checkbox" name="tab" value="${k}" ${on ? (on.includes(k) ? "checked" : "") : ADMIN_TABS.includes(k) ? "" : "checked"}> ${l}</label>`).join("")}</div></fieldset>`;
 const ROLE_NAME = { admin: "Admin", warehouse: "Warehouse", member: "Member" };
 const roleOptions = (cur) => Object.entries(ROLE_NAME).map(([k, l]) => `<option value="${k}"${k === cur ? " selected" : ""}>${l}</option>`).join("");
 const pickedTabs = (form) => new FormData(form).getAll("tab");
@@ -19,7 +21,7 @@ export async function mount(el, params, ctx) {
       <div class="panel"><div class="tablewrap"><table style="min-width:620px"><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Tabs</th><th>Added</th><th></th></tr></thead><tbody>
       ${rows.map((u) => `<tr><td><b>${esc(u.name)}</b>${u.username === me ? ` <span class="muted">(you)</span>` : ""}</td><td class="mono">${esc(u.username)}</td>
         <td>${u.role === "admin" ? '<span class="pill s-ok">Admin</span>' : esc(ROLE_NAME[u.role] || "Member")}</td>
-        <td class="muted">${u.role === "admin" || !u.tabs ? "All" : esc(u.tabs.map((k) => (TAB_LIST.find((t) => t[0] === k) || [k, k])[1]).join(", "))}</td><td class="muted">${esc((u.created_at || "").slice(0, 10))}</td>
+        <td class="muted">${u.role === "admin" ? "All" : !u.tabs ? "All except the admin tabs" : esc(u.tabs.map((k) => (TAB_LIST.find((t) => t[0] === k) || [k, k])[1]).join(", "))}</td><td class="muted">${esc((u.created_at || "").slice(0, 10))}</td>
         <td class="num">${u.role === "admin" ? "" : `<button class="btn small" data-tabs="${esc(u.username)}" data-have="${esc((u.tabs || []).join(","))}">Tabs</button> `}<button class="btn small" data-reset="${esc(u.username)}">Reset password</button>
           ${u.username === me ? "" : `<button class="btn small" data-role="${esc(u.username)}" data-cur="${esc(u.role)}">Role</button> <button class="btn small danger" data-remove="${esc(u.username)}">Remove</button>`}</td></tr>`).join("")}
       </tbody></table></div></div>

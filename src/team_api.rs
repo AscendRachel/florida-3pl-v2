@@ -12,7 +12,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 use sqlx::Row;
 
-use crate::auth::{AdminUser, CurrentUser};
+use crate::auth::CurrentUser;
 use crate::error::{AppError, AppResult};
 use crate::{clock, drive, settings, AppState};
 
@@ -55,7 +55,8 @@ pub async fn chat_send(CurrentUser(u): CurrentUser, State(s): State<AppState>, J
 }
 
 /// Admins: everybody's messages, newest first, filtered by date, person and words.
-pub async fn worklog(_a: AdminUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Json<Value>> {
+pub async fn worklog(CurrentUser(_a): CurrentUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Json<Value>> {
+    crate::auth::need_tab(&_a, "worklog")?;
     let get = |k: &str| q.get(k).map(String::as_str).unwrap_or("");
     let (mut where_, mut args): (Vec<String>, Vec<String>) = (vec![], vec![]);
     if !get("date").is_empty() {
@@ -96,7 +97,8 @@ pub async fn worklog(_a: AdminUser, State(s): State<AppState>, Query(q): Query<H
 
 // ---------------------------------------------------------------- branding
 
-pub async fn branding_save(_a: AdminUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+pub async fn branding_save(CurrentUser(_a): CurrentUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+    crate::auth::need_tab(&_a, "team")?;
     let mut cur: Value = serde_json::from_str(crate::routes::DEFAULT_BRANDING)?;
     if let Some(Value::Object(m)) = settings::get(&s.db, "branding").await? {
         for (k, v) in m {
@@ -274,13 +276,15 @@ async fn label_audit_uncached(s: &AppState) -> AppResult<Value> {
     Ok(json!({ "checked": checked, "unread": unread, "total": with_id, "mismatches": mismatches, "approved": approved, "reading": s.drive.state() }))
 }
 
-pub async fn admin_labels(_a: AdminUser, State(s): State<AppState>) -> AppResult<Json<Value>> {
+pub async fn admin_labels(CurrentUser(_a): CurrentUser, State(s): State<AppState>) -> AppResult<Json<Value>> {
+    crate::auth::need_tab(&_a, "admin")?;
     Ok(Json(label_audit(&s).await?))
 }
 
 /// An admin looked at a flagged label link and approves it (`approve` true) or takes the approval back (false). It is tied to the order row
 /// and the Drive file, so a link changed to another file is checked again.
-pub async fn label_approve(AdminUser(me): AdminUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+pub async fn label_approve(CurrentUser(me): CurrentUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+    crate::auth::need_tab(&me, "admin")?;
     let rn = b.get("rn").and_then(Value::as_u64).ok_or_else(|| AppError::bad("Which order?"))?;
     let file_id = b.get("file_id").and_then(Value::as_str).unwrap_or("");
     if file_id.len() < 10 || file_id.len() > 100 || !file_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
@@ -303,7 +307,8 @@ async fn n(s: &AppState, sql: &str) -> AppResult<i64> {
 }
 
 /// The Admin tab's cards: things to fix in All Orders. Labels made ahead of time have no order yet, so they are not counted.
-pub async fn admin_cards(_a: AdminUser, State(s): State<AppState>) -> AppResult<Json<Value>> {
+pub async fn admin_cards(CurrentUser(_a): CurrentUser, State(s): State<AppState>) -> AppResult<Json<Value>> {
+    crate::auth::need_tab(&_a, "admin")?;
     let sch = s.schema();
     let c = |h: &str| sch.c(h);
     let enc = |h: &str| h.replace(' ', "%20");
@@ -376,7 +381,8 @@ fn fmt(n: i64) -> String {
 ///  - shipped: the packages shipped to the customer ON that day, split by their Delivery Date
 ///  - pending: the Delivered packages with that Delivery Date or an earlier one that were still not shipped at the end of that day, split by Delivery Date
 /// Shipped means "Shipped to Customer" is ticked or the ship date is filled (a ship date after the day does not count as shipped yet).
-pub async fn admin_daily(_a: AdminUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Json<Value>> {
+pub async fn admin_daily(CurrentUser(_a): CurrentUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Json<Value>> {
+    crate::auth::need_tab(&_a, "admin")?;
     let day = q.get("date").cloned().unwrap_or_default();
     if day.len() != 10 || NaiveDate::parse_from_str(&day, "%Y-%m-%d").is_err() {
         return Err(AppError::bad("Pick a date."));

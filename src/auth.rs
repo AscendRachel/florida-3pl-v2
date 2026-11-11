@@ -21,8 +21,10 @@ use crate::{clock, AppState};
 pub const COOKIE_NAME: &str = "f3pl_session";
 pub const SESSION_DAYS: i64 = 14;
 pub const ROLES: [&str; 3] = ["admin", "warehouse", "member"];
-/// The tabs an admin can hand out to a member (Amazon Orders, Import, Team and Admin are admin-only).
-pub const TABS: [&str; 7] = ["dashboard", "scan", "cards", "orders", "returns", "materials", "checklist"];
+/// The tabs an admin can hand out to a member.
+pub const TABS: [&str; 12] = ["dashboard", "scan", "cards", "orders", "returns", "materials", "checklist", "worklog", "amazon", "import", "team", "admin"];
+/// The tabs that used to be for admins only: a member sees one only when it is ticked for them (an old "every tab" member does not get them).
+pub const ADMIN_TABS: [&str; 5] = ["worklog", "amazon", "import", "team", "admin"];
 /// Data that belongs to one tab (any of the tabs listed may read it). Shared data (orders, meta ...) stays open to every signed-in person.
 const API_TABS: [(&str, &[&str]); 5] = [
     ("/api/checklist", &["checklist"]),
@@ -44,6 +46,27 @@ pub struct User {
 impl User {
     pub fn is_admin(&self) -> bool {
         self.role == "admin"
+    }
+
+    /// Whether this person may use the tab: admins always; a member when it is one of their tabs
+    /// (no list = every tab except the ones in ADMIN_TABS).
+    pub fn can(&self, tab: &str) -> bool {
+        if self.is_admin() {
+            return true;
+        }
+        match &self.tabs {
+            Some(t) => t.iter().any(|x| x == tab),
+            None => !ADMIN_TABS.contains(&tab),
+        }
+    }
+}
+
+/// Stops the request unless the person may use this tab.
+pub fn need_tab(user: &User, tab: &str) -> AppResult<()> {
+    if user.can(tab) {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden("This tab is not open to you.".into()))
     }
 }
 
@@ -75,13 +98,15 @@ pub fn parse_tabs(stored: Option<&str>) -> Option<Vec<String>> {
     }
 }
 
-/// What is stored for the tabs picked: an error when none, NULL (all tabs) when all are picked.
+/// What is stored for the tabs picked: an error when none, NULL when exactly the ordinary tabs are picked (none of ADMIN_TABS).
 pub fn clean_tabs(tabs: &[String]) -> AppResult<Option<String>> {
     let got: Vec<&str> = TABS.iter().copied().filter(|t| tabs.iter().any(|x| x == t)).collect();
     if got.is_empty() {
         return Err(AppError::bad("Pick at least one tab."));
     }
-    Ok(if got.len() < TABS.len() { Some(serde_json::to_string(&got)?) } else { None })
+    let ordinary = TABS.iter().filter(|t| !ADMIN_TABS.contains(t)).count();
+    let plain_all = got.len() == ordinary && got.iter().all(|t| !ADMIN_TABS.contains(t));
+    Ok(if plain_all { None } else { Some(serde_json::to_string(&got)?) })
 }
 
 /// False when the person's tabs do not include the tab that owns this API path.
@@ -250,7 +275,7 @@ async fn admin_count(db: &MySqlPool) -> AppResult<i64> {
     Ok(sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE disabled = 0 AND role = 'admin'").fetch_one(db).await?)
 }
 
-async fn role_of(db: &MySqlPool, username: &str) -> AppResult<String> {
+pub async fn role_of(db: &MySqlPool, username: &str) -> AppResult<String> {
     sqlx::query_scalar("SELECT role FROM users WHERE username = ? AND disabled = 0").bind(username).fetch_optional(db).await?.ok_or_else(|| AppError::bad("No such user."))
 }
 

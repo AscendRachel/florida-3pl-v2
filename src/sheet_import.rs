@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use sqlx::Row;
 
 use crate::amazon::{percent_decode, plain_number};
-use crate::auth::AdminUser;
+use crate::auth::CurrentUser;
 use crate::error::{AppError, AppResult};
 use crate::import::{insert_conn, Val};
 use crate::orders_write::{norm_date, recompute_formulas, typed, Typed};
@@ -40,8 +40,9 @@ fn set_progress(s: &AppState, token: &str, pct: Option<f64>, text: &str) {
     }
 }
 
-pub async fn progress(_a: AdminUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> Json<Value> {
-    Json(s.progress.lock().unwrap().get(q.get("token").map(String::as_str).unwrap_or("")).cloned().unwrap_or(json!({})))
+pub async fn progress(CurrentUser(_a): CurrentUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Json<Value>> {
+    crate::auth::need_tab(&_a, "import")?;
+    Ok(Json(s.progress.lock().unwrap().get(q.get("token").map(String::as_str).unwrap_or("")).cloned().unwrap_or(json!({}))))
 }
 
 // ---------------------------------------------------------------- matching the file's columns to ours
@@ -267,7 +268,8 @@ async fn save_upload(s: &AppState, data: Vec<u8>, name: &str, token: &str) -> Ap
 }
 
 /// Save the uploaded file (raw request body) and report which tabs look like the orders tab.
-pub async fn upload(_a: AdminUser, State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> AppResult<Json<Value>> {
+pub async fn upload(CurrentUser(_a): CurrentUser, State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> AppResult<Json<Value>> {
+    crate::auth::need_tab(&_a, "import")?;
     let name = percent_decode(headers.get("X-Filename").and_then(|v| v.to_str().ok()).unwrap_or("upload"));
     if body.is_empty() {
         return Err(AppError::bad("The file is empty."));
@@ -277,7 +279,8 @@ pub async fn upload(_a: AdminUser, State(s): State<AppState>, headers: HeaderMap
 }
 
 /// Download a Google Sheet as .xlsx from its link (the sheet must be shared "Anyone with the link can view").
-pub async fn upload_link(_a: AdminUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+pub async fn upload_link(CurrentUser(_a): CurrentUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+    crate::auth::need_tab(&_a, "import")?;
     let url = b.get("url").and_then(Value::as_str).unwrap_or("");
     let Some(m) = Regex::new(r"docs\.google\.com/spreadsheets/d/([A-Za-z0-9_-]{20,})").unwrap().captures(url) else {
         return Err(AppError::bad("That doesn't look like a Google Sheets link. It should start with https://docs.google.com/spreadsheets/d/…"));
@@ -410,7 +413,8 @@ fn error_text(e: AppError) -> String {
 /// With `"background": true` the import keeps running on the server even if the connection closes (a proxy such as Cloudflare cuts
 /// requests at 100 seconds, which a big sheet on a small server can exceed); the request answers at once and the page follows
 /// `/api/progress?token=...`, which ends with `done: true` and the `result` or an `error`. Without it, the request waits for the result.
-pub async fn run_import(_a: AdminUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+pub async fn run_import(CurrentUser(_a): CurrentUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+    crate::auth::need_tab(&_a, "import")?;
     let mode = b.get("mode").and_then(Value::as_str).unwrap_or("").to_string();
     if !["replace", "append", "dropdowns"].contains(&mode.as_str()) {
         return Err(AppError::bad("Choose whether to replace or add to the existing orders."));

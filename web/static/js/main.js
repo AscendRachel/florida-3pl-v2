@@ -18,8 +18,9 @@ const VIEWS = {
   admin: { label: "Admin", mod: "./v-admin.js", admin: true },
 };
 const ctx = { me: null, isAdmin: () => ctx.me?.role === "admin" };
-// A member may be limited to some tabs (me.tabs); admins and members without a limit see every tab they are allowed.
-const allowed = (k) => VIEWS[k] && (!VIEWS[k].admin || ctx.isAdmin()) && (ctx.isAdmin() || !ctx.me?.tabs || ctx.me.tabs.includes(k));
+// A member sees the tabs ticked for them (me.tabs). With no list they see every tab except the admin ones (Work Log, Amazon Orders,
+// Import, Team, Admin), which a member only gets when they are ticked. Admins see every tab.
+const allowed = (k) => VIEWS[k] && (ctx.isAdmin() || (ctx.me?.tabs ? ctx.me.tabs.includes(k) : !VIEWS[k].admin));
 
 export function route() {
   const [name, ...rest] = (location.hash || "#" + store.get("gt_last_view", "dashboard")).slice(1).split("?");

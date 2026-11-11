@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
-use crate::auth::{self, AdminUser, CurrentUser};
+use crate::auth::{self, CurrentUser};
 use crate::error::{AppError, AppResult};
 use crate::{clock, AppState};
 
@@ -279,7 +279,8 @@ async fn change_password(CurrentUser(u): CurrentUser, State(s): State<AppState>,
 
 // ---------------------------------------------------------------- team (admins)
 
-async fn team_list(_a: AdminUser, State(s): State<AppState>) -> AppResult<Json<Value>> {
+async fn team_list(CurrentUser(me): CurrentUser, State(s): State<AppState>) -> AppResult<Json<Value>> {
+    auth::need_tab(&me, "team")?;
     Ok(Json(json!({ "items": auth::list_users(&s.db).await? })))
 }
 
@@ -287,8 +288,17 @@ fn tab_list(b: &Value) -> Option<Vec<String>> {
     b.get("tabs")?.as_array().map(|a| a.iter().filter_map(|t| t.as_str().map(str::to_string)).collect())
 }
 
-async fn team_action(AdminUser(me): AdminUser, State(s): State<AppState>, Path(action): Path<String>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+async fn team_action(CurrentUser(me): CurrentUser, State(s): State<AppState>, Path(action): Path<String>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+    auth::need_tab(&me, "team")?;
     let who = text(&b, "username");
+    // a member who was given the Team tab manages the other members only: no admin is made, changed, reset or removed by them
+    if !me.is_admin() {
+        let new_role = b.get("role").and_then(Value::as_str).unwrap_or("member");
+        let target_admin = action != "add" && auth::role_of(&s.db, who).await? == "admin";
+        if target_admin || ((action == "add" || action == "role") && new_role == "admin") {
+            return Err(AppError::Forbidden("Only admins can add or change an admin.".into()));
+        }
+    }
     match action.as_str() {
         "add" => {
             let role = b.get("role").and_then(Value::as_str).unwrap_or("member");
