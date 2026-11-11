@@ -16,7 +16,7 @@
 
 /* editing */
 .gc.s:not(.rn) { background: var(--brand-soft); }
-.gc.a { background: var(--panel) !important; }
+.gc.a { background: var(--panel) !important; color: var(--ink) !important; } /* the selected cell drops its row colour, so it takes the theme's text colour too (white text on a white cell was invisible) */
 .gc .cbx { cursor: pointer; }
 .editor { resize: none; line-height: 20px; padding: 4px 8px; font: inherit; font-size: 13px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
 .fbar { margin-top: 2px; }
