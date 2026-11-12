@@ -228,7 +228,7 @@ fn parse_orders(path: &std::path::Path, sheet: &str, sch: &Schema, mut tick: Opt
         out.push((n, vals));
     }
     let used: HashSet<usize> = pos.values().copied().collect();
-    let missing: Vec<String> = sch.cols.iter().filter(|c| !c.deleted && !c.custom && !used.contains(&c.i)).map(|c| c.header.clone()).collect();
+    let missing: Vec<String> = sch.cols.iter().filter(|c| !c.deleted && !c.custom && !used.contains(&c.i) && !crate::schema::COMPUTED.iter().any(|(h, _)| *h == c.header)).map(|c| c.header.clone()).collect();
     let (dropdowns, unsupported) = parse_dropdowns(&rules);
     Ok(Parsed { rows: out, matched: pos.len(), ignored, missing, skipped, dropdowns_unsupported: unsupported, dropdowns, pos })
 }

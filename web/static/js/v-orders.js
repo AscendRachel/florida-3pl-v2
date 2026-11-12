@@ -43,7 +43,10 @@ export async function mount(el, params, ctx) {
   // Gift Note (Label Number + Customer Name) used to start hidden: show it once for everyone who had it hidden; their own choice after that is kept
   if (store.get("gt_gift_shown", "") !== "1") { hidden.delete("Gift Note"); store.set("gt_gift_shown", "1"); store.set("gt_orders_hidden", JSON.stringify([...hidden])); }
   const widths = readJson("gt_orders_widths", {});
-  const st = { q: "", card: "", cf: {}, sort: "", dir: "asc", total: 0, act: null, anc: null, edit: null, rowSel: false };
+  const st = { q: "", card: "", cf: {}, sort: "", dir: "asc", total: 0, act: null, anc: null, edit: null, rowSel: false, keep: new Set() };
+  // In a filtered view (a Dashboard card, a search, a column filter ...) a row this person changed stays on screen even when the change made it
+  // stop matching, with the colour of its new status. It goes away when they change the filter or leave All Orders.
+  const filtering = () => !!(st.q || st.card || st.etaday || st.uspsday || Object.keys(st.cf).length);
   const pages = new Map(); // page number -> rows
   const inflight = new Set();
   const dvMap = new Map(); // "rn:col" -> id of the dropdown list on that cell
@@ -86,7 +89,7 @@ export async function mount(el, params, ctx) {
 
   const sc = $("#sc"), body = $("#gbody"), rowsEl = $("#rows"), inner = $("#inner");
 
-  const query = (extra = {}) => ({ q: st.q, card: st.card, sort: st.sort, dir: st.dir, flt: st.cf, ...(st.etaday ? { etaday: st.etaday } : {}), ...(st.uspsday ? { uspsday: st.uspsday } : {}), ...extra });
+  const query = (extra = {}) => ({ q: st.q, card: st.card, sort: st.sort, dir: st.dir, flt: st.cf, ...(st.etaday ? { etaday: st.etaday } : {}), ...(st.uspsday ? { uspsday: st.uspsday } : {}), ...(st.keep.size ? { keep: [...st.keep] } : {}), ...extra });
   const rowAt = (i) => pages.get(Math.floor(i / PAGE))?.[i % PAGE];
   const countText = () => `${fmt(st.total)} order${st.total === 1 ? "" : "s"}${nFilters() ? ` · ${nFilters()} column filter${nFilters() === 1 ? "" : "s"}` : ""}`;
   // (a page that answers after the person has already left All Orders finds nothing to write to: that is not an error)
@@ -312,6 +315,7 @@ export async function mount(el, params, ctx) {
       const out = await api("/api/cells", { edits: items.map(({ rn, col, value }) => ({ rn, col, value })) });
       const { values, v } = out;
       if (v) knownV = v;
+      if (filtering()) items.forEach((it) => st.keep.add(it.rn));
       items.forEach((it, n) => { patchCache(it.rn, it.col, values[n], it.r); });
       (out.also || []).forEach((a) => patchCache(a.rn, a.col, a.value));
       new Set(items.map((it) => it.r)).forEach(recalc);
@@ -1000,6 +1004,7 @@ export async function mount(el, params, ctx) {
       const vals = draft.mode === "out" && !draft.set.size ? null : { mode: draft.mode, list: [...draft.set] };
       const kc = draft.colors.size ? { list: [...draft.colors] } : null;
       if (cond || vals || kc) st.cf[c.i] = { c: cond, v: vals, k: kc }; else delete st.cf[c.i];
+      st.keep.clear();
       finish();
     };
     menu.addEventListener("click", (e) => {
@@ -1418,7 +1423,7 @@ export async function mount(el, params, ctx) {
   }
   function setView(v) {
     const s = v || { q: "", card: "", cf: {}, sort: "", dir: "asc" };
-    st.q = s.q; st.card = ""; st.cf = JSON.parse(JSON.stringify(known(s.cf))); st.sort = s.sort; st.dir = s.dir;
+    st.q = s.q; st.card = ""; st.cf = JSON.parse(JSON.stringify(known(s.cf))); st.sort = s.sort; st.dir = s.dir; st.keep.clear();
     $("#q").value = s.q;
     activeId = v ? v.id : "";
     store.set("gt_orders_view", activeId);
@@ -1496,9 +1501,9 @@ export async function mount(el, params, ctx) {
     if (e.target.closest("#addRowBtn")) return addRows([{}]);
     if (e.target.closest("#trashBtn")) return trashDialog();
     const card = e.target.closest("[data-card]");
-    if (card) { st.card = card.dataset.card === "all" ? "" : card.dataset.card; renderCards(); return reset(); }
+    if (card) { st.card = card.dataset.card === "all" ? "" : card.dataset.card; st.keep.clear(); renderCards(); return reset(); }
     if (e.target.closest("#clear")) {
-      st.q = ""; st.card = ""; st.cf = {}; st.etaday = ""; st.uspsday = ""; $("#q").value = ""; showEtaNote();
+      st.q = ""; st.card = ""; st.cf = {}; st.etaday = ""; st.uspsday = ""; st.keep.clear(); $("#q").value = ""; showEtaNote();
       renderCards(); drawHead();
       return reset();
     }
@@ -1529,7 +1534,7 @@ export async function mount(el, params, ctx) {
       drawHead(); paint();
     }
   };
-  const applySearch = debounce(() => { st.q = $("#q").value; reset(); });
+  const applySearch = debounce(() => { st.q = $("#q").value; st.keep.clear(); reset(); });
   el.oninput = (e) => { if (e.target.id === "q") applySearch(); };
   el.addEventListener("pointerdown", (e) => {
     const rz = e.target.closest("[data-rz]");
@@ -1611,6 +1616,14 @@ export async function mount(el, params, ctx) {
     st.q = ""; st.card = ""; st.sort = ""; st.dir = "asc"; $("#q").value = "";
     st.cf = { [srcNoCol.i]: { c: { op: "notempty", a: "", b: "" }, v: null, k: null }, [srcTrkCol.i]: { c: { op: "empty", a: "", b: "" }, v: null, k: null } };
     if (statusCol) st.cf[statusCol.i] = { c: null, v: { mode: "out", list: ["Delivered", "Cancelled", "Refunded", "For Refund", "Unfulfilled"] }, k: null };
+  }
+  // coming from the Dashboard card "Source Time Frame": the orders with 4 or more Source Delivery Days
+  const sdCol = cols.find((c) => c.key === "Source Delivery Days");
+  if (params.get("show") === "sourcedays" && sdCol) {
+    st.q = ""; st.card = ""; st.sort = String(sdCol.i); st.dir = "desc"; $("#q").value = "";
+    st.cf = { [sdCol.i]: { c: { op: "gte", a: "4", b: "" }, v: null, k: null } };
+    // the card does not count the delivered, refunded, for refund, cancelled and unfulfilled orders
+    if (statusCol) st.cf[statusCol.i] = { c: null, v: { mode: "out", list: ["Delivered", "For Refund", "Refunded", "Cancelled", "Unfulfilled"] }, k: null };
   }
   // coming from the Team Daily Check List card of the estimated delivery dates changed on a day
   const showEtaNote = () => {

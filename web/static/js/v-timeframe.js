@@ -1,5 +1,5 @@
-// Source Time Frame: the orders whose ETA moved to another date. Each with its Source Order Date and Number, the first ETA that was
-// recorded, the current ETA, how many times it moved, and how many days it moved in all (New ETA minus First ETA). Read only.
+// Moved ETA: the orders whose ETA moved to another date. Each with its Source Order Date and Number, the first ETA that was
+// recorded, the current ETA, how many times it moved, and the days from the Source Order Date to the New ETA. Read only.
 import { $, api, brand, confirmBox, esc, fmt, toast } from "./util.js";
 
 const COLS = [
@@ -10,8 +10,8 @@ export async function mount(el) {
   const st = { q: "", sort: "sod", dir: "desc", page: 1 };
   let data = null, gen = 0, timer = null;
 
-  el.innerHTML = `<div class="section-head"><div><div class="eyebrow">${esc(brand.name)}</div><h2>Source Time Frame</h2>
-      <p>The orders whose estimated delivery date (ETA) was moved to another date, for example by an Amazon order import. <b>First ETA</b> is the first date that was recorded, <b>New ETA</b> is the current Delivery Date, <b>Changes Count</b> is how many times it moved, and <b>Delivery Time Frame</b> is how many days it moved in all (New ETA minus First ETA).</p></div></div>
+  el.innerHTML = `<div class="section-head"><div><div class="eyebrow">${esc(brand.name)}</div><h2>Moved ETA</h2>
+      <p>The orders whose estimated delivery date (ETA) was moved to another date, for example by an Amazon order import. <b>First ETA</b> is the first date that was recorded, <b>New ETA</b> is the current Delivery Date, <b>Changes Count</b> is how many times it moved, and <b>Delivery Time Frame</b> is the days from the Source Order Date to the New ETA (New ETA minus Source Order Date).</p></div></div>
     <div class="panel"><div class="btnrow" style="gap:12px;align-items:center;flex-wrap:wrap">
       <input type="search" id="tfq" placeholder="Search a Source Order Number or date" autocomplete="off" style="min-width:260px">
       <span class="muted" id="tfcount"></span></div>

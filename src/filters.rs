@@ -218,6 +218,19 @@ pub fn build_where(schema: &Schema, p: &Value, skip: Option<usize>) -> AppResult
             args.extend(a);
         }
     }
-    let sql = if where_.is_empty() { String::new() } else { format!(" WHERE {}", where_.iter().map(|w| format!("({w})")).collect::<Vec<_>>().join(" AND ")) };
+    // `keep`: rows the person changed on this screen stay in the list even when the change made them stop matching the filter
+    // (they are dropped when the person changes the filter or leaves the screen)
+    let keep: Vec<u64> = p.get("keep").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).take(1000).collect()).unwrap_or_default();
+    let sql = if where_.is_empty() {
+        String::new()
+    } else {
+        let all = where_.iter().map(|w| format!("({w})")).collect::<Vec<_>>().join(" AND ");
+        if keep.is_empty() {
+            format!(" WHERE {all}")
+        } else {
+            args.extend(keep.iter().map(|rn| Arg::S(rn.to_string())));
+            format!(" WHERE (({all}) OR rn IN ({}))", vec!["?"; keep.len()].join(","))
+        }
+    };
     Ok(Built { sql, args })
 }

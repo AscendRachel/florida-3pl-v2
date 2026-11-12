@@ -1,6 +1,6 @@
-//! Source Time Frame: the orders whose estimated delivery date (ETA) moved to another date at least once (a new Delivery Date from an
+//! Moved ETA: the orders whose estimated delivery date (ETA) moved to another date at least once (a new Delivery Date from an
 //! Amazon order import or an edit). One line per such order: its Source Order Date and Number, the first ETA that was recorded, the
-//! current ETA, how many times the ETA moved, and how many days the ETA moved in all (New ETA minus First ETA).
+//! current ETA, how many times the ETA moved, and the Delivery Time Frame: the days from the Source Order Date to the current ETA (New ETA minus Source Order Date).
 //! Nothing is stored for this page: everything comes from the orders and from the edit history.
 
 use std::collections::HashMap;
@@ -60,7 +60,7 @@ pub async fn list(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Ha
 
     let sql = format!(
         "SELECT o.rn, CAST(o.{sod} AS CHAR), CAST(o.{son} AS CHAR), CAST(a.first_eta AS CHAR) AS first_eta, CAST(o.{eta} AS CHAR), \
-         CAST(IFNULL(a.changes, 0) AS SIGNED) AS changes, CAST(DATEDIFF(substr(o.{eta}, 1, 10), substr(a.first_eta, 1, 10)) AS SIGNED) AS frame \
+         CAST(IFNULL(a.changes, 0) AS SIGNED) AS changes, CAST(DATEDIFF(substr(o.{eta}, 1, 10), substr(o.{sod}, 1, 10)) AS SIGNED) AS frame \
          FROM orders_text o {history} WHERE {where_sql} ORDER BY {order}, o.rn DESC LIMIT {PAGE} OFFSET {}",
         (page - 1) * PAGE
     );

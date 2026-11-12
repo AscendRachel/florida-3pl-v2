@@ -23,9 +23,13 @@ const PROTECTED_SCAN: [&str; 24] = [
     "Hold Date", "Updated by", "SHIPPED TO  CUSTOMER DATE", "SHIPPED TO  AMAZON DATE", "Store", "Notes", "Items Received",
 ];
 const PROTECTED_CARDS: [&str; 4] = ["Tracking Status", "ITEM ON HOLD", "To Void", "Stock"];
+const PROTECTED_DASHBOARD: [&str; 1] = ["Source Delivery Days"];
 
 /// Calculated columns: the one on the left is always the columns on the right written one after the other.
 pub const FORMULAS: [(&str, &[&str]); 1] = [("Gift Note", &["Label Number", "Customer Name"])];
+
+/// Columns the database works out by itself (a computed column of the orders table): nobody types into them. (header, what it is)
+pub const COMPUTED: [(&str, &str); 1] = [("Source Delivery Days", "Delivery Date - Source Order Date, in days")];
 
 #[derive(Clone, Debug)]
 pub struct Col {
@@ -117,13 +121,23 @@ impl Schema {
             "The Scan page reads it"
         } else if PROTECTED_CARDS.contains(&header) {
             "A summary card on All Orders counts it"
+        } else if PROTECTED_DASHBOARD.contains(&header) {
+            "A Dashboard card counts it"
         } else {
             ""
         }
     }
 
+    /// The columns nobody types into: the calculated ones (Gift Note) and the ones the database works out (Source Delivery Days).
     pub fn formula_cols(&self) -> Vec<usize> {
-        FORMULAS.iter().filter(|(t, src)| self.at(t).is_some() && src.iter().all(|s| self.at(s).is_some())).filter_map(|(t, _)| self.at(t)).collect()
+        let mut v: Vec<usize> = FORMULAS.iter().filter(|(t, src)| self.at(t).is_some() && src.iter().all(|s| self.at(s).is_some())).filter_map(|(t, _)| self.at(t)).collect();
+        v.extend(self.computed_cols());
+        v
+    }
+
+    /// The columns the database works out itself (they cannot be written at all, not even when a deleted row is put back).
+    pub fn computed_cols(&self) -> Vec<usize> {
+        COMPUTED.iter().filter_map(|(h, _)| self.at(h)).collect()
     }
 
     /// The SQL of one column as text, for the view (`o` is the orders table).

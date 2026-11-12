@@ -409,7 +409,7 @@ pub async fn cells(CurrentUser(user): CurrentUser, State(s): State<AppState>, Js
         let col = &sch.cols[j];
         let mut why = locks.blocked(&user, j, rn);
         if why.is_empty() && formula_cols.contains(&j) {
-            let src = crate::schema::FORMULAS.iter().find(|(t, _)| *t == col.header).map(|(_, s)| s.join(" + ")).unwrap_or_default();
+            let src = crate::schema::FORMULAS.iter().find(|(t, _)| *t == col.header).map(|(_, s)| s.join(" + ")).or_else(|| crate::schema::COMPUTED.iter().find(|(h, _)| *h == col.header).map(|(_, t)| t.to_string())).unwrap_or_default();
             why = format!("{} is calculated ({src}). Change those columns instead.", col.header);
         }
         if !why.is_empty() {
@@ -637,8 +637,9 @@ pub async fn rows(CurrentUser(user): CurrentUser, State(s): State<AppState>, axu
                 let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orders WHERE rn = ?").bind(rn).fetch_one(&mut *tx).await?;
                 let new_rn = if exists > 0 { top += 1; top } else { *rn };
                 sqlx::query("INSERT INTO orders (rn, search_text) VALUES (?, ?)").bind(new_rn).bind(d["s"].as_str().unwrap_or("")).execute(&mut *tx).await?;
+                let computed = sch.computed_cols();
                 for (j, v) in vals.iter().enumerate().take(sch.n()) {
-                    if !v.is_empty() && sch.active(j) {
+                    if !v.is_empty() && sch.active(j) && !computed.contains(&j) {
                         write_field(&mut tx, &sch, new_rn, j, v).await?;
                     }
                 }

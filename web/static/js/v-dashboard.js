@@ -22,7 +22,7 @@ const LEGEND = [
   ["Purple", "#9900ff", "Return to Sender. The package was unsuccessfully delivered and is being returned to the sender (3PL/warehouse)."],
 ];
 
-const TONE = { estimated: "info", warehouse: "violet", hold: "warn", customer: "ok", usps: "ok", amazon: "info", arrived: "ok" };
+const TONE = { estimated: "info", warehouse: "violet", hold: "warn", customer: "ok", usps: "ok", sourcetf: "warn", amazon: "info", arrived: "ok" };
 
 export async function mount(el, params, ctx) {
   let day = params.get("date") || "", data = null, timer = null;

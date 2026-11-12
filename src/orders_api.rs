@@ -61,9 +61,10 @@ pub async fn meta(_u: CurrentUser, State(s): State<AppState>) -> AppResult<Json<
         .filter(|c| !c.deleted)
         .map(|c| {
             let f = crate::schema::FORMULAS.iter().find(|(t, _)| *t == c.header).filter(|_| formula_cols.contains(&c.i));
+            let computed = crate::schema::COMPUTED.iter().find(|(h, _)| *h == c.header).map(|(_, text)| *text).unwrap_or("");
             json!({
                 "i": c.i, "name": c.label, "key": c.header, "kind": c.kind, "custom": c.custom, "protected": sch.protected(&c.header),
-                "formula": f.map(|(_, src)| src.join(" + ")).unwrap_or_default(),
+                "formula": f.map(|(_, src)| src.join(" + ")).unwrap_or_else(|| computed.to_string()),
                 "formula_from": f.map(|(_, src)| src.iter().filter_map(|x| sch.at(x)).collect::<Vec<_>>()).unwrap_or_default(),
             })
         })
