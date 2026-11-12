@@ -123,6 +123,8 @@ pub async fn dashboard(_u: CurrentUser, State(s): State<AppState>, Query(q): Que
     let on = |h: &str| format!("substr({}, 1, 10) = ?", sch.c(h));
     let c = |h: &str| sch.c(h);
 
+    let prev = NaiveDate::parse_from_str(&day, "%Y-%m-%d").map(|d| d - chrono::Duration::days(1)).unwrap_or_default();
+    let (usps_from, usps_to) = (format!("{} 14:00", prev.format("%Y-%m-%d")), format!("{day} 14:00"));
     let hourly = hours(&by_hour(&s, "SHIPPED TO  CUSTOMER DATE", "customer", &day).await?, &ops);
     let store = hours(&by_hour(&s, "SHIPPED TO  AMAZON DATE", "amazon", &day).await?, &ops);
     let cards = json!([
@@ -132,6 +134,9 @@ pub async fn dashboard(_u: CurrentUser, State(s): State<AppState>, Query(q): Que
             c("Source Order Status"), c("Shipped to Customer"), c("Package Not Received"), c("Tracking Status")), &[]).await? },
         { "key": "hold", "label": "On Hold Orders", "n": count(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE {}", on("Hold Date")), &[&day]).await? },
         { "key": "customer", "label": "Total Shipped to Customer", "n": total_of(&hourly) },
+        // the USPS truck comes at 2 PM: what was shipped to the customer since the last pick-up (2:00 PM the day before until 1:59 PM that day)
+        { "key": "usps", "label": "Packages Picked Up by USPS", "note": "shipped from 2 PM the day before to 1:59 PM", "href": format!("#orders?uspsday={day}"), "n": count(&s, &format!(
+            "SELECT COUNT(*) FROM orders_text WHERE {col} >= ? AND {col} < ?", col = c("SHIPPED TO  CUSTOMER DATE")), &[&usps_from, &usps_to]).await? },
         { "key": "amazon", "label": "Total Shipped to Amazon", "n": count(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE {}", on("SHIPPED TO  AMAZON DATE")), &[&day]).await? },
         // counted by the Delivery Date (the estimated delivery date from the Amazon file), for the rows that are Delivered
         { "key": "arrived", "label": "Packages Arrived Today", "n": count(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE {} = 'Delivered' AND {}", c("Source Order Status"), on("Delivery Date")), &[&day]).await? },

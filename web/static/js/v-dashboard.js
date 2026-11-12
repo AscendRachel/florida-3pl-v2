@@ -22,7 +22,7 @@ const LEGEND = [
   ["Purple", "#9900ff", "Return to Sender. The package was unsuccessfully delivered and is being returned to the sender (3PL/warehouse)."],
 ];
 
-const TONE = { estimated: "info", warehouse: "violet", hold: "warn", customer: "ok", amazon: "info", arrived: "ok" };
+const TONE = { estimated: "info", warehouse: "violet", hold: "warn", customer: "ok", usps: "ok", amazon: "info", arrived: "ok" };
 
 export async function mount(el, params, ctx) {
   let day = params.get("date") || "", data = null, timer = null;
@@ -54,8 +54,8 @@ export async function mount(el, params, ctx) {
           <button class="btn" id="next" title="Next day">›</button>
           ${isToday ? "" : '<button class="btn" id="today">Today</button>'}
           ${ctx.isAdmin() ? '<button class="btn" id="ops">Operators</button>' : ""}</div></div>
-      <div class="dash-cards">${data.cards.map((c) => `<div class="scard ${TONE[c.key] || ""} dash-card"><div class="dash-n">${fmt(c.n)}</div>
-        <div class="dash-l">${esc(c.label)}${c.note ? `<div class="muted">${esc(c.note)}</div>` : ""}</div></div>`).join("")}</div>
+      <div class="dash-cards">${data.cards.map((c) => `<${c.href ? `a href="${esc(c.href)}" title="Show these orders in All Orders" style="text-decoration:none;color:inherit"` : "div"} class="scard ${TONE[c.key] || ""} dash-card"><div class="dash-n">${fmt(c.n)}</div>
+        <div class="dash-l">${esc(c.label)}${c.note ? `<div class="muted">${esc(c.note)}</div>` : ""}</div></${c.href ? "a" : "div"}>`).join("")}</div>
       <div class="dash-cards dash-counters">${data.counters.map((c) => `<div class="scard neutral dash-card" title="${esc(c.note)}"><div class="dash-n">${fmt(c.n)}</div>
         <div class="dash-l">${esc(c.label)}<div class="muted">${esc(c.note)}</div></div></div>`).join("")}</div>
       <div class="dash-legend-head"><h3>Rows color legend</h3><span class="muted">Always refer to the row color in All Orders to understand the status of an order and take the appropriate action.</span></div>

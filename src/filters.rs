@@ -190,6 +190,13 @@ pub fn build_where(schema: &Schema, p: &Value, skip: Option<usize>) -> AppResult
         args.push(Arg::S(start.format("%Y-%m-%d %H:%M:%S").to_string()));
         args.push(Arg::S((start + Duration::days(1)).format("%Y-%m-%d %H:%M:%S").to_string()));
     }
+    // the Dashboard card "Packages Picked Up by USPS": shipped to the customer from 2:00 PM the day before until 1:59 PM on that day
+    if let Ok(day) = NaiveDate::parse_from_str(&st(p, "uspsday"), "%Y-%m-%d") {
+        let col = schema.c("SHIPPED TO  CUSTOMER DATE");
+        where_.push(format!("{col} >= ? AND {col} < ?"));
+        args.push(Arg::S(format!("{} 14:00", (day - Duration::days(1)).format("%Y-%m-%d"))));
+        args.push(Arg::S(format!("{} 14:00", day.format("%Y-%m-%d"))));
+    }
     let card = st(p, "card");
     for (key, _, _, _, col, val) in CARDS {
         if key == card {
