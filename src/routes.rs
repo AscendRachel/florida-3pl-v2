@@ -43,6 +43,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/me/password", post(change_password))
         .route("/api/team", get(team_list))
         .route("/api/team/:action", post(team_action))
+        .route("/api/roles/:action", post(roles_action))
         .route("/api/meta", get(crate::orders_api::meta))
         .route("/api/orders", get(crate::orders_api::orders_get).post(crate::orders_api::orders))
         .route("/api/values", get(crate::orders_api::values_get).post(crate::orders_api::values))
@@ -264,8 +265,9 @@ async fn logout(State(s): State<AppState>, headers: HeaderMap) -> AppResult<Resp
     Ok((AppendHeaders([(SET_COOKIE, auth::cookie_value("", is_https(&headers), Some(0))), (SET_COOKIE, crate::pma::clear_cookie())]), Json(json!({ "ok": true }))).into_response())
 }
 
-async fn me(CurrentUser(u): CurrentUser) -> Json<Value> {
-    Json(json!({ "username": u.username, "name": u.name, "role": u.role, "tabs": u.tabs, "tz_offset_min": clock::offset_minutes() }))
+async fn me(CurrentUser(u): CurrentUser, State(s): State<AppState>) -> Json<Value> {
+    let roles = auth::role_labels(&s.db).await.unwrap_or_else(|_| json!({}));
+    Json(json!({ "username": u.username, "name": u.name, "role": u.role, "is_super": u.is_super, "tabs": u.tabs, "roles": roles, "tz_offset_min": clock::offset_minutes() }))
 }
 
 async fn change_password(CurrentUser(u): CurrentUser, State(s): State<AppState>, headers: HeaderMap, Json(b): Json<Value>) -> AppResult<Response> {
@@ -281,7 +283,19 @@ async fn change_password(CurrentUser(u): CurrentUser, State(s): State<AppState>,
 
 async fn team_list(CurrentUser(me): CurrentUser, State(s): State<AppState>) -> AppResult<Json<Value>> {
     auth::need_tab(&me, "team")?;
-    Ok(Json(json!({ "items": auth::list_users(&s.db).await? })))
+    Ok(Json(json!({ "items": auth::list_users(&s.db).await?, "roles": auth::list_roles(&s.db).await? })))
+}
+
+/// Admins add, change and remove the roles people can be given.
+async fn roles_action(_a: auth::AdminUser, State(s): State<AppState>, Path(action): Path<String>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+    let tabs = tab_list(&b);
+    match action.as_str() {
+        "add" => auth::add_role(&s.db, text(&b, "label"), tabs.as_deref()).await?,
+        "edit" => auth::edit_role(&s.db, text(&b, "name"), text(&b, "label"), tabs.as_deref()).await?,
+        "remove" => auth::remove_role(&s.db, text(&b, "name")).await?,
+        _ => return Err(AppError::NotFound),
+    }
+    Ok(Json(json!({ "roles": auth::list_roles(&s.db).await? })))
 }
 
 fn tab_list(b: &Value) -> Option<Vec<String>> {
@@ -299,6 +313,15 @@ async fn team_action(CurrentUser(me): CurrentUser, State(s): State<AppState>, Pa
             return Err(AppError::Forbidden("Only admins can add or change an admin.".into()));
         }
     }
+    // the super admin (the first admin account) is changed by nobody else; the other admins are removed or demoted only by the super admin
+    if action != "add" && auth::is_super(&s.db, who).await? {
+        let own = who == me.username;
+        if matches!(action.as_str(), "remove" | "role" | "tabs") || !own {
+            return Err(AppError::Forbidden("The super admin account cannot be changed.".into()));
+        }
+    } else if matches!(action.as_str(), "remove" | "role") && !me.is_super && auth::role_of(&s.db, who).await? == "admin" {
+        return Err(AppError::Forbidden("Only the super admin can remove an admin or change an admin's role.".into()));
+    }
     match action.as_str() {
         "add" => {
             let role = b.get("role").and_then(Value::as_str).unwrap_or("member");
@@ -311,5 +334,5 @@ async fn team_action(CurrentUser(me): CurrentUser, State(s): State<AppState>, Pa
         "role" => auth::set_role(&s.db, who, text(&b, "role")).await?,
         _ => return Err(AppError::NotFound),
     }
-    Ok(Json(json!({ "items": auth::list_users(&s.db).await? })))
+    Ok(Json(json!({ "items": auth::list_users(&s.db).await?, "roles": auth::list_roles(&s.db).await? })))
 }

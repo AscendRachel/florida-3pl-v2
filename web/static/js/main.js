@@ -1,7 +1,7 @@
 // App shell: who is signed in, navigation, and the view router. Add the next tabs to VIEWS.
 import { loadBranding } from "./branding.js";
 import { bell, paintBell, startNotifications } from "./notifications.js";
-import { $, api, dialog, esc, store, toast, tzEastern } from "./util.js";
+import { $, api, dialog, esc, roleNames, store, toast, tzEastern } from "./util.js";
 
 const VIEWS = {
   dashboard: { label: "Dashboard", mod: "./v-dashboard.js" },
@@ -36,7 +36,7 @@ function renderNav() {
     .join("");
   const me = ctx.me;
   $("#me").innerHTML = me
-    ? `<span><b>${esc(me.name)}</b> · ${{ admin: "Admin", warehouse: "Warehouse" }[me.role] || "Member"}</span>
+    ? `<span><b>${esc(me.name)}</b> · ${esc(me.roles?.[me.role] || { admin: "Admin", warehouse: "Warehouse" }[me.role] || "Member")}</span>
        ${bell()}<button class="btn small" id="themeBtn" title="Switch light/dark">◐</button>
        <button class="btn small" id="pwBtn">Password</button><button class="btn small" id="outBtn">Sign out</button>`
     : "";
@@ -117,6 +117,7 @@ window.addEventListener("hashchange", show);
   try {
     await loadBranding();
     ctx.me = await api("/api/me");
+    Object.assign(roleNames, ctx.me.roles || {});
     tzEastern.off = ctx.me.tz_offset_min ?? 300;
   } catch (err) {
     $("#main").innerHTML = `<div class="banner bad">Can't reach the server (${esc(err.message)}).</div>`;

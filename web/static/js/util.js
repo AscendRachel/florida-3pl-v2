@@ -90,7 +90,9 @@ export function toast(msg, kind = "") {
 }
 
 // ---- modal dialog: returns a promise resolved with the button value
-export function dialog({ title, body, actions = [["Close", "close"]], wide = false, enterSaves = false }) {
+// role key -> the name people see (Admin, Warehouse, Member and the roles the admins added); filled in when the page loads
+export const roleNames = {};
+export function dialog({ title, body, actions = [["Close", "close"]], wide = false, enterSaves = false, onOpen = null }) {
   return new Promise((resolve) => {
     const dlg = document.createElement("dialog");
     dlg.className = "modal" + (wide ? " wide" : "");
@@ -111,6 +113,7 @@ export function dialog({ title, body, actions = [["Close", "close"]], wide = fal
     });
     document.body.append(dlg);
     dlg.showModal();
+    if (onOpen) onOpen(dlg);
     dlg.querySelector("input,select,textarea")?.focus();
   });
 }

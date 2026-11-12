@@ -84,7 +84,8 @@ export async function mount(el, params, ctx) {
           <input type="number" min="0" max="9999" inputmode="numeric" name="items" value="${r.qty_declared - r.items_received}" required></label>
           <button class="btn primary" type="submit">Confirm count</button></form>` : ""}
         ${r.print ? `<div class="sc-print" id="pr${i}"></div>` : ""}
-        ${["pnr", "voided"].includes(r.outcome) ? "" : `<div class="sc-pnr" id="pnr${i}"><button class="btn small danger" data-pnr="${i}">Package not received</button></div>`}
+        ${r.outcome === "pnr" ? `<div class="sc-pnr" id="rcv${i}"><button class="btn small primary" data-received="${i}">Package received</button> <span class="muted">The package arrived after all: removes the Package Not Received flag, then scans this package again.</span></div>`
+          : r.outcome === "voided" ? "" : `<div class="sc-pnr" id="pnr${i}"><button class="btn small danger" data-pnr="${i}">Package not received</button></div>`}
       </div></article>`;
   };
 
@@ -234,6 +235,14 @@ export async function mount(el, params, ctx) {
       doScan($("#scan").value);
     } else if (t.closest("[data-pnr]")) {
       setPnr(idx("pnr"), true);
+    } else if (t.closest("[data-received]")) {
+      const i = idx("received"), btn = t.closest("[data-received]");
+      btn.disabled = true;
+      try {
+        await api("/api/scan/pnr", { rn: lastRes.results[i].rn, flag: false, operator, dry: practice, code: lastRes.code });
+        if (practice) { toast("Practice mode: nothing was saved."); btn.disabled = false; }
+        else { toast("Package Not Received flag removed."); await doScan(lastRes.code); }
+      } catch (err) { toast(err.message, "bad"); btn.disabled = false; }
     } else if (t.closest("[data-pnrundo]")) {
       setPnr(idx("pnrundo"), false);
     } else if (t.closest("[data-preview]")) {

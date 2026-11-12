@@ -1,5 +1,5 @@
 // The bell in the top bar: notes other people wrote on orders. Click it for a list; click a notification to open that order's row.
-import { $, ago, api, esc } from "./util.js";
+import { $, ago, api, esc, roleNames } from "./util.js";
 
 const ROLE = { admin: "Admin", warehouse: "Warehouse", member: "Member" };
 const state = { items: [], unread: 0, open: false, fresh: new Set(), orders: true };
@@ -36,7 +36,7 @@ function drawPopup() {
   const rows = state.items.map((it) => `<a class="nt-item${state.fresh.has(it.id) ? " new" : ""}${it.mine ? " mine" : ""}" href="${esc(link(it))}">
       <span class="nt-av" aria-hidden="true">${esc((it.by_name || "?").trim().charAt(0).toUpperCase())}</span>
       <span class="nt-body">
-        <span class="nt-line"><b>${esc(it.by_name)}</b> <span class="nt-role">${esc(ROLE[it.by_role] || "Member")}</span> ${what(it)}</span>
+        <span class="nt-line"><b>${esc(it.by_name)}</b> <span class="nt-role">${esc(roleNames[it.by_role] || ROLE[it.by_role] || it.by_role || "Member")}</span> ${what(it)}</span>
         <span class="nt-order">${esc(it.label || "Order")}${it.customer ? ` · ${esc(it.customer)}` : ""}${it.field === "Notes" ? "" : " · Internal notes"}</span>
         <span class="nt-text">${esc(it.text)}</span>
         <span class="nt-time">${esc(ago(it.at))}</span>

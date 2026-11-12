@@ -41,6 +41,8 @@ pub struct User {
     pub name: String,
     pub role: String,
     pub tabs: Option<Vec<String>>,
+    /// The first admin account: nobody else can change or remove it, and only it can remove other admins.
+    pub is_super: bool,
 }
 
 impl User {
@@ -78,12 +80,13 @@ struct UserRow {
     salt: String,
     role: String,
     tabs: Option<String>,
+    is_super: bool,
 }
 
 impl UserRow {
     fn user(self) -> User {
         let tabs = if self.role == "admin" { None } else { parse_tabs(self.tabs.as_deref()) };
-        User { username: self.username, name: self.name, role: self.role, tabs }
+        User { username: self.username, name: self.name, is_super: self.is_super && self.role == "admin", role: self.role, tabs }
     }
 }
 
@@ -160,8 +163,8 @@ pub async fn add_user(db: &MySqlPool, username: &str, name: &str, password: &str
         return Err(AppError::bad("Username: 3 to 30 letters, numbers, dots, dashes or underscores."));
     }
     check_password_rules(password)?;
-    if !ROLES.contains(&role) {
-        return Err(AppError::bad("Role must be Admin, Warehouse or Member."));
+    if !role_exists(db, role).await? {
+        return Err(AppError::bad("That role does not exist."));
     }
     if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE username = ?").bind(&username).fetch_one(db).await? > 0 {
         return Err(AppError::bad("That username is taken."));
@@ -170,7 +173,8 @@ pub async fn add_user(db: &MySqlPool, username: &str, name: &str, password: &str
     let (pw, s) = (password.to_string(), salt.clone());
     let hash = tokio::task::spawn_blocking(move || hash_pw(&pw, &s)).await?;
     let shown: String = name.trim().chars().take(60).collect();
-    sqlx::query("INSERT INTO users (username, name, pw_hash, salt, role, tabs, created_at) VALUES (?,?,?,?,?,?,?)")
+    let first_admin = role == "admin" && sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE is_super = 1 AND disabled = 0").fetch_one(db).await? == 0;
+    sqlx::query("INSERT INTO users (username, name, pw_hash, salt, role, tabs, created_at, is_super) VALUES (?,?,?,?,?,?,?,?)")
         .bind(&username)
         .bind(if shown.is_empty() { &username } else { &shown })
         .bind(hash)
@@ -178,6 +182,7 @@ pub async fn add_user(db: &MySqlPool, username: &str, name: &str, password: &str
         .bind(role)
         .bind(tabs_text)
         .bind(clock::now())
+        .bind(first_admin)
         .execute(db)
         .await?;
     Ok(username)
@@ -198,7 +203,7 @@ pub async fn set_password(db: &MySqlPool, username: &str, password: &str) -> App
 
 /// The person when the username and password are right.
 pub async fn check_login(db: &MySqlPool, username: &str, password: &str) -> AppResult<Option<User>> {
-    let row: Option<UserRow> = sqlx::query_as("SELECT username, name, pw_hash, salt, role, CAST(tabs AS CHAR) AS tabs FROM users WHERE username = ? AND disabled = 0")
+    let row: Option<UserRow> = sqlx::query_as("SELECT username, name, pw_hash, salt, role, CAST(tabs AS CHAR) AS tabs, is_super FROM users WHERE username = ? AND disabled = 0")
         .bind(username.trim().to_lowercase())
         .fetch_optional(db)
         .await?;
@@ -224,7 +229,7 @@ fn utc_now() -> NaiveDateTime {
 
 pub async fn session_user(db: &MySqlPool, token: &str) -> AppResult<Option<User>> {
     let row: Option<UserRow> = sqlx::query_as(
-        "SELECT u.username, u.name, u.pw_hash, u.salt, u.role, CAST(u.tabs AS CHAR) AS tabs FROM sessions s JOIN users u ON u.username = s.username \
+        "SELECT u.username, u.name, u.pw_hash, u.salt, u.role, CAST(u.tabs AS CHAR) AS tabs, u.is_super FROM sessions s JOIN users u ON u.username = s.username \
          WHERE s.token = ? AND s.expires_at > ? AND u.disabled = 0",
     )
     .bind(token)
@@ -246,16 +251,17 @@ struct ListRow {
     role: String,
     created_at: NaiveDateTime,
     tabs: Option<String>,
+    is_super: bool,
 }
 
 /// The team list as the Team page expects it: [{username, name, role, created_at, tabs}].
 pub async fn list_users(db: &MySqlPool) -> AppResult<Vec<serde_json::Value>> {
-    let rows: Vec<ListRow> = sqlx::query_as("SELECT username, name, CAST(role AS CHAR) AS role, created_at, CAST(tabs AS CHAR) AS tabs FROM users WHERE disabled = 0 ORDER BY role, username").fetch_all(db).await?;
+    let rows: Vec<ListRow> = sqlx::query_as("SELECT username, name, CAST(role AS CHAR) AS role, created_at, CAST(tabs AS CHAR) AS tabs, is_super FROM users WHERE disabled = 0 ORDER BY is_super DESC, role, username").fetch_all(db).await?;
     Ok(rows
         .into_iter()
         .map(|r| {
             let tabs = if r.role == "admin" { None } else { parse_tabs(r.tabs.as_deref()) };
-            serde_json::json!({ "username": r.username, "name": r.name, "role": r.role, "created_at": r.created_at.format("%Y-%m-%d %H:%M").to_string(), "tabs": tabs })
+            serde_json::json!({ "username": r.username, "name": r.name, "role": r.role, "created_at": r.created_at.format("%Y-%m-%d %H:%M").to_string(), "tabs": tabs, "is_super": r.is_super && r.role == "admin" })
         })
         .collect())
 }
@@ -275,6 +281,10 @@ async fn admin_count(db: &MySqlPool) -> AppResult<i64> {
     Ok(sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE disabled = 0 AND role = 'admin'").fetch_one(db).await?)
 }
 
+pub async fn is_super(db: &MySqlPool, username: &str) -> AppResult<bool> {
+    Ok(sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE username = ? AND disabled = 0 AND is_super = 1 AND role = 'admin'").bind(username).fetch_one(db).await? > 0)
+}
+
 pub async fn role_of(db: &MySqlPool, username: &str) -> AppResult<String> {
     sqlx::query_scalar("SELECT role FROM users WHERE username = ? AND disabled = 0").bind(username).fetch_optional(db).await?.ok_or_else(|| AppError::bad("No such user."))
 }
@@ -282,6 +292,9 @@ pub async fn role_of(db: &MySqlPool, username: &str) -> AppResult<String> {
 pub async fn remove_user(db: &MySqlPool, username: &str, by: &str) -> AppResult<()> {
     if username == by {
         return Err(AppError::bad("You cannot remove your own account."));
+    }
+    if is_super(db, username).await? {
+        return Err(AppError::Forbidden("The super admin account cannot be removed.".into()));
     }
     if role_of(db, username).await? == "admin" && admin_count(db).await? <= 1 {
         return Err(AppError::bad("There must always be at least one admin."));
@@ -292,8 +305,11 @@ pub async fn remove_user(db: &MySqlPool, username: &str, by: &str) -> AppResult<
 }
 
 pub async fn set_role(db: &MySqlPool, username: &str, role: &str) -> AppResult<()> {
-    if !ROLES.contains(&role) {
-        return Err(AppError::bad("Role must be Admin, Warehouse or Member."));
+    if role != "admin" && is_super(db, username).await? {
+        return Err(AppError::Forbidden("The super admin account cannot be changed.".into()));
+    }
+    if !role_exists(db, role).await? {
+        return Err(AppError::bad("That role does not exist."));
     }
     if role_of(db, username).await? == "admin" && role != "admin" && admin_count(db).await? <= 1 {
         return Err(AppError::bad("There must always be at least one admin."));
@@ -346,4 +362,89 @@ impl FromRequestParts<AppState> for AdminUser {
         }
         Ok(Self(user))
     }
+}
+
+// ---------------------------------------------------------------- roles (added and removed by admins)
+
+pub async fn role_exists(db: &MySqlPool, name: &str) -> AppResult<bool> {
+    Ok(sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM roles WHERE name = ?").bind(name).fetch_one(db).await? > 0)
+}
+
+/// [{name, label, builtin, tabs, people}] in the order they are offered.
+pub async fn list_roles(db: &MySqlPool) -> AppResult<Vec<serde_json::Value>> {
+    let rows: Vec<(String, String, Option<String>, i8, i64)> = sqlx::query_as(
+        "SELECT CAST(r.name AS CHAR), CAST(r.label AS CHAR), CAST(r.tabs AS CHAR), r.builtin, (SELECT COUNT(*) FROM users u WHERE u.role = r.name AND u.disabled = 0) FROM roles r ORDER BY r.pos, r.label",
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|(name, label, tabs, builtin, people)| serde_json::json!({ "name": name, "label": label, "builtin": builtin != 0, "tabs": parse_tabs(tabs.as_deref()), "people": people })).collect())
+}
+
+/// The tabs picked for a role, as stored (None when none are picked, and for Admin, who always has every tab).
+fn role_tabs(name: &str, tabs: Option<&[String]>) -> AppResult<Option<String>> {
+    let Some(list) = tabs else { return Ok(None) };
+    let got: Vec<&str> = TABS.iter().copied().filter(|t| list.iter().any(|x| x == t)).collect();
+    if got.is_empty() || name == "admin" {
+        return Ok(None);
+    }
+    Ok(Some(serde_json::to_string(&got)?))
+}
+
+fn role_label_ok(label: &str) -> AppResult<String> {
+    let label: String = label.split_whitespace().collect::<Vec<_>>().join(" ");
+    if label.is_empty() || label.chars().count() > 40 {
+        return Err(AppError::bad("Give the role a name of up to 40 characters."));
+    }
+    Ok(label)
+}
+
+pub async fn add_role(db: &MySqlPool, label: &str, tabs: Option<&[String]>) -> AppResult<()> {
+    let label = role_label_ok(label)?;
+    let key: String = label.to_lowercase().chars().filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit()).take(20).collect();
+    if key.is_empty() {
+        return Err(AppError::bad("The role name needs at least one letter or number."));
+    }
+    let taken: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM roles WHERE name = ? OR LOWER(label) = LOWER(?)").bind(&key).bind(&label).fetch_one(db).await?;
+    if taken > 0 {
+        return Err(AppError::bad("There is already a role with that name."));
+    }
+    let pos: i64 = sqlx::query_scalar("SELECT CAST(IFNULL(MAX(pos), 0) + 1 AS SIGNED) FROM roles").fetch_one(db).await?;
+    sqlx::query("INSERT INTO roles (name, label, tabs, builtin, pos) VALUES (?,?,?,0,?)").bind(&key).bind(&label).bind(role_tabs(&key, tabs)?).bind(pos).execute(db).await?;
+    Ok(())
+}
+
+pub async fn edit_role(db: &MySqlPool, name: &str, label: &str, tabs: Option<&[String]>) -> AppResult<()> {
+    if !role_exists(db, name).await? {
+        return Err(AppError::bad("That role does not exist."));
+    }
+    let label = role_label_ok(label)?;
+    let taken: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM roles WHERE LOWER(label) = LOWER(?) AND name <> ?").bind(&label).bind(name).fetch_one(db).await?;
+    if taken > 0 {
+        return Err(AppError::bad("There is already a role with that name."));
+    }
+    sqlx::query("UPDATE roles SET label = ?, tabs = ? WHERE name = ?").bind(&label).bind(role_tabs(name, tabs)?).bind(name).execute(db).await?;
+    Ok(())
+}
+
+pub async fn remove_role(db: &MySqlPool, name: &str) -> AppResult<()> {
+    let builtin: Option<i8> = sqlx::query_scalar("SELECT builtin FROM roles WHERE name = ?").bind(name).fetch_optional(db).await?;
+    match builtin {
+        None => return Err(AppError::bad("That role does not exist.")),
+        _ => {}
+    }
+    if name == "admin" {
+        return Err(AppError::bad("The Admin role cannot be removed."));
+    }
+    let people: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = ? AND disabled = 0").bind(name).fetch_one(db).await?;
+    if people > 0 {
+        return Err(AppError::bad(format!("{people} {} this role. Change their role first, then remove it.", if people == 1 { "person still has" } else { "people still have" })));
+    }
+    sqlx::query("DELETE FROM roles WHERE name = ?").bind(name).execute(db).await?;
+    Ok(())
+}
+
+/// role key -> label, for showing people's roles by name.
+pub async fn role_labels(db: &MySqlPool) -> AppResult<serde_json::Value> {
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT CAST(name AS CHAR), CAST(label AS CHAR) FROM roles").fetch_all(db).await?;
+    Ok(serde_json::Value::Object(rows.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))).collect()))
 }
