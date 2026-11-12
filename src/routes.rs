@@ -42,6 +42,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/me", get(me))
         .route("/api/me/password", post(change_password))
         .route("/api/timeframe", get(crate::timeframe::list))
+        .route("/api/timeframe/resolve", post(crate::timeframe::resolve))
+        .route("/api/timeframe/reopen", post(crate::timeframe::reopen))
         .route("/api/team", get(team_list))
         .route("/api/team/:action", post(team_action))
         .route("/api/roles/:action", post(roles_action))

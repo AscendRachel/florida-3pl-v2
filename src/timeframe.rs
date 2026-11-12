@@ -11,8 +11,8 @@ use serde_json::{json, Value};
 use sqlx::Row;
 
 use crate::auth::CurrentUser;
-use crate::error::AppResult;
-use crate::AppState;
+use crate::error::{AppError, AppResult};
+use crate::{clock, AppState};
 
 const PAGE: i64 = 100;
 
@@ -21,13 +21,15 @@ pub async fn list(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Ha
     let (sod, son, eta) = (sch.c("Source Order Date"), sch.c("Source Order Number"), sch.c("Delivery Date"));
 
     // per order: how often the ETA moved to another date (the same rule as the Check List card) and the first ETA ever recorded
-    let history = "LEFT JOIN (SELECT rn, \
-         SUM(CASE WHEN trim(IFNULL(old_value, '')) <> '' AND substr(trim(IFNULL(old_value, '')), 1, 10) <> substr(trim(IFNULL(new_value, '')), 1, 10) AND note <> 'Row added' THEN 1 ELSE 0 END) AS changes, \
-         SUBSTRING_INDEX(GROUP_CONCAT(CASE WHEN trim(IFNULL(old_value, '')) <> '' THEN trim(old_value) ELSE trim(IFNULL(new_value, '')) END ORDER BY id SEPARATOR '|'), '|', 1) AS first_eta \
-         FROM edit_log WHERE field = 'delivery_date' GROUP BY rn) a ON a.rn = o.rn";
+    // (the whole history counts, also after an order was marked resolved: resolving only hides the order until its ETA moves again)
+    let history = "LEFT JOIN (SELECT e.rn, \
+         SUM(CASE WHEN trim(IFNULL(e.old_value, '')) <> '' AND substr(trim(IFNULL(e.old_value, '')), 1, 10) <> substr(trim(IFNULL(e.new_value, '')), 1, 10) AND e.note <> 'Row added' THEN 1 ELSE 0 END) AS changes, \
+         MAX(CASE WHEN trim(IFNULL(e.old_value, '')) <> '' AND substr(trim(IFNULL(e.old_value, '')), 1, 10) <> substr(trim(IFNULL(e.new_value, '')), 1, 10) AND e.note <> 'Row added' THEN e.id END) AS last_change, \
+         SUBSTRING_INDEX(GROUP_CONCAT(CASE WHEN trim(IFNULL(e.old_value, '')) <> '' THEN trim(e.old_value) ELSE trim(IFNULL(e.new_value, '')) END ORDER BY e.id SEPARATOR '|'), '|', 1) AS first_eta \
+         FROM edit_log e WHERE e.field = 'delivery_date' GROUP BY e.rn) a ON a.rn = o.rn LEFT JOIN timeframe_resolved r ON r.rn = o.rn";
 
     // only the orders that meet the rule: the ETA was moved to another date at least once
-    let mut where_ = vec![format!("o.{son} <> ''"), "IFNULL(a.changes, 0) > 0".to_string()];
+    let mut where_ = vec![format!("o.{son} <> ''"), "IFNULL(a.changes, 0) > 0".to_string(), "a.last_change > IFNULL(r.up_to_id, 0)".to_string()];
     let mut args: Vec<String> = vec![];
     let term = q.get("q").map(|t| t.trim()).unwrap_or("");
     if !term.is_empty() {
@@ -78,4 +80,30 @@ pub async fn list(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Ha
         })
         .collect();
     Ok(Json(json!({ "items": items, "total": total, "page": page, "pages": ((total + PAGE - 1) / PAGE).max(1) })))
+}
+
+/// Mark an order resolved: it leaves the table until its ETA moves again. Answers with the earlier mark (if any) so the page can undo it.
+pub async fn resolve(CurrentUser(u): CurrentUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+    let rn = b.get("rn").and_then(Value::as_u64).ok_or_else(|| AppError::bad("Which order?"))?;
+    let latest: Option<i64> = sqlx::query_scalar("SELECT CAST(MAX(id) AS SIGNED) FROM edit_log WHERE rn = ? AND field = 'delivery_date'").bind(rn).fetch_one(&s.db).await?;
+    let Some(latest) = latest else { return Err(AppError::bad("This order has no ETA change to resolve.")) };
+    let prev: Option<i64> = sqlx::query_scalar("SELECT up_to_id FROM timeframe_resolved WHERE rn = ?").bind(rn).fetch_optional(&s.db).await?;
+    sqlx::query("INSERT INTO timeframe_resolved (rn, up_to_id, resolved_by, resolved_at) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE up_to_id = VALUES(up_to_id), resolved_by = VALUES(resolved_by), resolved_at = VALUES(resolved_at)")
+        .bind(rn)
+        .bind(latest)
+        .bind(&u.name)
+        .bind(clock::now())
+        .execute(&s.db)
+        .await?;
+    Ok(Json(json!({ "ok": true, "prev": prev })))
+}
+
+/// Undo a resolve: put back the earlier mark, or none.
+pub async fn reopen(_u: CurrentUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
+    let rn = b.get("rn").and_then(Value::as_u64).ok_or_else(|| AppError::bad("Which order?"))?;
+    match b.get("prev").and_then(Value::as_i64) {
+        Some(prev) => sqlx::query("UPDATE timeframe_resolved SET up_to_id = ? WHERE rn = ?").bind(prev).bind(rn).execute(&s.db).await?,
+        None => sqlx::query("DELETE FROM timeframe_resolved WHERE rn = ?").bind(rn).execute(&s.db).await?,
+    };
+    Ok(Json(json!({ "ok": true })))
 }
