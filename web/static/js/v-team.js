@@ -2,7 +2,7 @@
 import { applyBranding } from "./branding.js";
 import { api, brand, confirmBox, dialog, esc, roleNames, toast } from "./util.js";
 
-const TAB_LIST = [["dashboard", "Dashboard"], ["scan", "Scan"], ["cards", "Order Cards"], ["orders", "All Orders"], ["returns", "Returns"], ["materials", "Materials"], ["checklist", "Team Daily Check List"],
+const TAB_LIST = [["dashboard", "Dashboard"], ["scan", "Scan"], ["cards", "Order Cards"], ["orders", "All Orders"], ["returns", "Returns"], ["materials", "Materials"], ["checklist", "Team Daily Check List"], ["timeframe", "Source Time Frame"],
   ["worklog", "Work Log"], ["amazon", "Amazon Orders"], ["import", "Import"], ["team", "Team"], ["admin", "Admin"]];
 const ADMIN_TABS = ["worklog", "amazon", "import", "team", "admin"]; // only when ticked: a member with no list does not get these
 const tabBoxes = (on) => `<fieldset class="tabpick" style="border:1px solid var(--line,#ccc);border-radius:8px;padding:8px 12px;margin:0 0 10px"><legend>Tabs this person can see</legend>

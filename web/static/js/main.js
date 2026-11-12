@@ -11,6 +11,7 @@ const VIEWS = {
   returns: { label: "Returns", mod: "./v-returns.js" },
   materials: { label: "Materials", mod: "./v-materials.js" },
   checklist: { label: "Team Daily Check List", mod: "./v-checklist.js" },
+  timeframe: { label: "Source Time Frame", mod: "./v-timeframe.js" },
   worklog: { label: "Work Log", mod: "./v-worklog.js", admin: true },
   amazon: { label: "Amazon Orders", mod: "./v-amazon.js", admin: true },
   import: { label: "Import", mod: "./v-import.js", admin: true },
