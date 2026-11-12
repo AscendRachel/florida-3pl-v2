@@ -61,6 +61,7 @@ export async function mount(el, params, ctx) {
     for (const row of rows) rowLocks.delete(row[0]);
     for (const [rn, id] of Object.entries(r.locks.rows)) rowLocks.set(+rn, id);
   };
+  let pinCount = 1; // columns frozen on the left: the first one, and the Gift Note when it comes right after it
   let gen = 0, list = [], lefts = [], geo = { total: RN_W }, lastDown = { t: 0, r: -1, k: -1 }, dragging = false, rowDrag = false, downAt = 0, downXY = [0, 0];
 
   const width = (c) => widths[c.name] || (c.kind === "bool" ? 100 : c.kind === "date" ? 130 : c.kind === "num" ? 90 : WIDTHS[c.name] || 150);
@@ -131,10 +132,11 @@ export async function mount(el, params, ctx) {
     let x = RN_W;
     lefts = list.map((c) => { const l = x; x += width(c); return l; });
     geo = { total: x };
+    pinCount = list.length > 1 && list[1].key === "Gift Note" ? 2 : 1;
     inner.style.width = x + "px";
     $("#hrow").innerHTML = `<div class="hc rn" style="width:${RN_W}px;height:${HEAD_H}px">#</div>` + list.map((c, i) => {
       const f = st.cf[c.i], on = !!(f && (f.c || f.v || f.k)), sorted = st.sort === String(c.i) || st.sort.startsWith(`color:${c.i}:`);
-      return `<div class="hc${i === 0 ? " pin" : ""}${on ? " filtered" : ""}" style="width:${width(c)}px;height:${HEAD_H}px;${i === 0 ? `left:${lefts[0]}px` : ""}">
+      return `<div class="hc${i < pinCount ? " pin" : ""}${on ? " filtered" : ""}" style="width:${width(c)}px;height:${HEAD_H}px;${i < pinCount ? `left:${lefts[i]}px` : ""}">
         <span class="hl" title="${esc(colLocks[c.i] ? `${c.name}. ${lockTip(lockDefs[colLocks[c.i]])}` : c.formula ? `${c.name} is calculated: ${c.formula}` : c.name)}">${colLocks[c.i] ? "🔒 " : ""}${c.formula ? "ƒ " : ""}${esc(c.name)}</span>${sorted ? `<span class="hs">${st.dir === "asc" ? "▲" : "▼"}</span>` : ""}
         <button class="fb${on ? " on" : ""}" data-fb="${c.i}" title="Sort and filter" aria-label="Sort and filter ${esc(c.name)}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M1.5 2.5h13l-5 6v5l-3-1.8V8.5z" fill="currentColor"/></svg></button><i class="rz" data-rz="${c.i}"></i></div>`;
     }).join("");
@@ -216,8 +218,8 @@ export async function mount(el, params, ctx) {
   sc.addEventListener("scroll", hideHover, { passive: true });
 
   function cell(c, v, i, r, rn, sel, cf) {
-    const style = `width:${width(c)}px;${i === 0 ? `left:${RN_W}px` : ""}${cf ? `;--cf-bg:${cf.bg};--cf-fg:${cf.fg}` : ""}`;
-    let h = "", cls = (i === 0 ? " pin" : "") + (cf ? " cf" : "");
+    const style = `width:${width(c)}px;${i < pinCount ? `left:${lefts[i]}px` : ""}${cf ? `;--cf-bg:${cf.bg};--cf-fg:${cf.fg}` : ""}`;
+    let h = "", cls = (i < pinCount ? " pin" : "") + (cf ? " cf" : "");
     if (!v) h = "";
     else if (c.kind === "bool") h = `<input type="checkbox" class="cbx" ${v === "TRUE" ? "checked" : ""} tabindex="-1">`, cls += " ctr";
     else if (c.kind === "num") cls += " r", h = esc(v);
@@ -276,8 +278,8 @@ export async function mount(el, params, ctx) {
     const topPad = HEAD_H + FILT_H, y = topPad + r * ROW_H;
     if (y - topPad < sc.scrollTop) sc.scrollTop = y - topPad;
     else if (y + ROW_H > sc.scrollTop + sc.clientHeight - 14) sc.scrollTop = y + ROW_H - sc.clientHeight + 14;
-    if (k === 0) return;
-    const x = lefts[k], w = width(list[k]), pinW = RN_W + width(list[0]);
+    if (k < pinCount) return;
+    const x = lefts[k], w = width(list[k]), pinW = lefts[pinCount - 1] + width(list[pinCount - 1]);
     if (x - pinW < sc.scrollLeft) sc.scrollLeft = x - pinW;
     else if (x + w > sc.scrollLeft + sc.clientWidth - 14) sc.scrollLeft = x + w - sc.clientWidth + 14;
   }
@@ -420,14 +422,14 @@ export async function mount(el, params, ctx) {
     };
   }
   function placeEditor() {
-    if (dd) dd.menu.style.left = (dd.k === 0 ? sc.scrollLeft + RN_W : lefts[dd.k]) + "px";
+    if (dd) dd.menu.style.left = (dd.k < pinCount ? sc.scrollLeft + lefts[dd.k] : lefts[dd.k]) + "px";
     const e = st.edit;
     if (!e) return;
-    const left = e.k === 0 ? sc.scrollLeft + RN_W : lefts[e.k];
+    const left = e.k < pinCount ? sc.scrollLeft + lefts[e.k] : lefts[e.k];
     if (e.calEl) e.calEl.style.cssText = `top:${(e.r + 1) * ROW_H + 2}px;left:${left}px`;
     e.ta.style.cssText = `top:${e.r * ROW_H}px;left:${left}px;width:${Math.max(width(list[e.k]), 140)}px;height:${ROW_H}px`;
     e.ta.style.height = Math.min(160, Math.max(ROW_H, e.ta.scrollHeight)) + "px";
-    e.ta.classList.toggle("pinned", e.k === 0);
+    e.ta.classList.toggle("pinned", e.k < pinCount);
   }
   function cancelEdit() {
     closeDropdown();
@@ -483,7 +485,7 @@ export async function mount(el, params, ctx) {
       const topPad = HEAD_H + FILT_H, h = menu.offsetHeight;
       const below = sc.scrollTop + sc.clientHeight - topPad - (at.r + 1) * ROW_H;
       menu.style.top = (below < h && at.r * ROW_H > h ? at.r * ROW_H - h : (at.r + 1) * ROW_H) + "px";
-      menu.style.left = (at.k === 0 ? sc.scrollLeft + RN_W : lefts[at.k]) + "px";
+      menu.style.left = (at.k < pinCount ? sc.scrollLeft + lefts[at.k] : lefts[at.k]) + "px";
       menu.style.minWidth = Math.max(width(c), 220) + "px";
     };
     const pick = (n) => {
@@ -1162,10 +1164,10 @@ export async function mount(el, params, ctx) {
       fillH.title = "Drag down to fill. Drag past the last row to add new rows.";
       body.append(fillH);
     }
-    const k = s.k2, right = k === 0 ? sc.scrollLeft + RN_W + width(list[0]) : lefts[k] + width(list[k]);
+    const k = s.k2, right = k < pinCount ? sc.scrollLeft + lefts[k] + width(list[k]) : lefts[k] + width(list[k]);
     fillH.style.left = right - 7 + "px";
     fillH.style.top = (s.r2 + 1) * ROW_H - 7 + "px";
-    fillH.classList.toggle("pinned", k === 0);
+    fillH.classList.toggle("pinned", k < pinCount);
   }
 
   async function addRows(rows, { selectCols = null } = {}) {
@@ -1220,7 +1222,7 @@ export async function mount(el, params, ctx) {
     const box = document.createElement("div");
     box.className = "fillbox";
     body.append(box);
-    const x1 = s.k1 === 0 ? RN_W : lefts[s.k1], w = lefts[s.k2] + width(list[s.k2]) - x1;
+    const x1 = lefts[s.k1], w = lefts[s.k2] + width(list[s.k2]) - x1;
     let target = s.r2, lastY = e.clientY;
     const update = () => {
       const r = Math.floor((lastY - body.getBoundingClientRect().top) / ROW_H);
