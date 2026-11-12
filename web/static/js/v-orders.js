@@ -152,14 +152,19 @@ export async function mount(el, params, ctx) {
   const dupes = {};
   const keyIdx = Object.fromEntries(cols.map((c) => [c.key, c.i]));
   const formatRow = makeFormatter(keyIdx, dupes);
-  async function loadDupes() {
+  let dupesAt = 0;
+  async function loadDupes(fresh = false) {
+    dupesAt = Date.now();
     try {
-      const { values } = await api("/api/duplicates");
+      const { values } = await api("/api/duplicates" + (fresh ? "?fresh=1" : ""));
       for (const [name, list] of Object.entries(values)) dupes[name] = new Set(list);
       paint();
     } catch { /* the colours for duplicates appear at the next refresh */ }
   }
-  const loadDupesSoon = debounce(loadDupes, 700);
+  // after this person edited one of the duplicate-checked columns: look again at once. Otherwise (scrolling, other people's changes)
+  // at most once a minute: working the duplicates out reads the whole table, and many screens asking all the time slowed the server down.
+  const loadDupesFresh = debounce(() => loadDupes(true), 700);
+  const loadDupesSoon = debounce(() => { if (Date.now() - dupesAt > 60000) loadDupes(); }, 700);
 
   // ---- Google Drive links: show the file's name (it holds the customer and the tracking number), and a preview on hover
   const driveNames = new Map(); // file id -> name ("" when it cannot be read)
@@ -308,7 +313,7 @@ export async function mount(el, params, ctx) {
       items.forEach((it, n) => { patchCache(it.rn, it.col, values[n], it.r); });
       (out.also || []).forEach((a) => patchCache(a.rn, a.col, a.value));
       new Set(items.map((it) => it.r)).forEach(recalc);
-      if (items.some((it) => DUP_COLUMNS.includes(cols.find((c) => c.i === it.col)?.key))) loadDupesSoon();
+      if (items.some((it) => DUP_COLUMNS.includes(cols.find((c) => c.i === it.col)?.key))) loadDupesFresh();
       const refused = items.map((it, n) => values[n] !== it.value && values[n] === olds[n].value);
       if (record && olds.some((_, n) => !refused[n])) { undo.push(olds.filter((_, n) => !refused[n])); if (undo.length > 50) undo.shift(); }
       if (out.skipped) toast(`${out.reason}${out.skipped < items.length ? ` (${fmt(out.skipped)} protected cell${out.skipped === 1 ? "" : "s"} skipped, the rest were saved.)` : ""}`, "bad");

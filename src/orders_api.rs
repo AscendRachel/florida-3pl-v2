@@ -289,8 +289,22 @@ pub async fn values_get(u: CurrentUser, st: State<AppState>, Query(q): Query<Has
 
 // ---------------------------------------------------------------- small lookups
 
+/// The last answer of `duplicates`, shared by everybody: (when it was made, the data version it is for, the answer).
+static DUP_ANSWER: tokio::sync::Mutex<Option<(std::time::Instant, u64, Value)>> = tokio::sync::Mutex::const_new(None);
+
 /// For the duplicate highlighting of All Orders (the sheet's =countif(C:C,C2)>1): the values that occur more than once.
-pub async fn duplicates(_u: CurrentUser, State(s): State<AppState>) -> AppResult<Json<Value>> {
+/// Working them out reads the whole table four times, so one answer is made for all the people and screens: it is reused while
+/// the data has not changed, and for 30 seconds after it was made unless the caller asks for a fresh one (`fresh=1`, after
+/// that person edited one of these columns). People asking at the same time wait for the one answer instead of each running the scans.
+pub async fn duplicates(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Json<Value>> {
+    let fresh = q.get("fresh").is_some_and(|v| v == "1");
+    let mut held = DUP_ANSWER.lock().await;
+    let v = s.version_now();
+    if let Some((at, ver, answer)) = held.as_ref() {
+        if *ver == v || (!fresh && at.elapsed() < std::time::Duration::from_secs(30)) {
+            return Ok(Json(answer.clone()));
+        }
+    }
     let sch = s.schema();
     let mut out = Map::new();
     for name in crate::cformat::DUP_COLUMNS {
@@ -298,7 +312,9 @@ pub async fn duplicates(_u: CurrentUser, State(s): State<AppState>) -> AppResult
         let rows: Vec<String> = sqlx::query_scalar(&format!("SELECT lower(trim({c})) v FROM orders_text WHERE trim({c}) != '' GROUP BY v HAVING COUNT(*) > 1")).fetch_all(&s.db).await?;
         out.insert(name.to_string(), json!(rows));
     }
-    Ok(Json(json!({ "values": out })))
+    let answer = json!({ "values": out });
+    *held = Some((std::time::Instant::now(), v, answer.clone()));
+    Ok(Json(answer))
 }
 
 pub async fn history(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Json<Value>> {
