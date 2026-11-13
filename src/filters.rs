@@ -50,7 +50,7 @@ pub fn bind_args<'q>(mut q: Query<'q, MySql, MySqlArguments>, args: &'q [Arg]) -
 }
 
 /// A LIKE pattern for "contains" (the text lower-cased; % _ and | are escaped with |).
-fn like_arg(text: &str) -> String {
+pub fn like_arg(text: &str) -> String {
     let mut out = String::from("%");
     for c in text.to_lowercase().chars() {
         if matches!(c, '%' | '_' | '|') {

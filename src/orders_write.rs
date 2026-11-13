@@ -29,14 +29,17 @@ const SHIP_KINDS: [(&str, &str); 2] = [("SHIPPED TO  CUSTOMER DATE", "customer")
 
 // ---------------------------------------------------------------- text <-> typed values
 
+/// "Nov", "Sept", "November" (any case) -> 1..=12
 fn month_number(m: &str) -> Option<u32> {
-    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].iter().position(|x| x.eq_ignore_ascii_case(m)).map(|i| i as u32 + 1)
+    const FULL: [&str; 12] = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+    let m = m.to_lowercase();
+    FULL.iter().position(|f| *f == m || (m.len() >= 3 && f.starts_with(m.as_str()) && (m.len() == 3 || m == "sept"))).map(|i| i as u32 + 1)
 }
 
-/// "Mar 6, 2026" or "Mar 6, 2026 3:04 PM" -> "2026-03-06" / "2026-03-06 15:04"; anything else is returned as it is.
+/// "Mar 6, 2026", "March 6, 2026" or "Mar 6, 2026 3:04 PM" -> "2026-03-06" / "2026-03-06 15:04"; anything else is returned as it is.
 pub fn norm_date(s: &str) -> String {
     // built once (this runs for every date cell of an imported sheet)
-    static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(r"^\s*([A-Za-z]{3})\s+(\d{1,2}),\s*(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM))?\s*$").unwrap());
+    static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(r"^\s*([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s*(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM))?\s*$").unwrap());
     let Some(m) = RE.captures(s) else { return s.to_string() };
     let Some(mo) = month_number(&m[1]) else { return s.to_string() };
     let mut out = format!("{:04}-{:02}-{:02}", m[3].parse::<u32>().unwrap_or(0), mo, m[2].parse::<u32>().unwrap_or(0));
@@ -78,7 +81,7 @@ pub fn clean_value(kind: &str, v: &str) -> Result<String, String> {
             if is_iso(&d) {
                 Ok(d)
             } else {
-                Err("use a date like Mar 6, 2026".into())
+                Err("use a date like Mar 6, 2026 or March 6, 2026".into())
             }
         }
         _ => Ok(v.to_string()),

@@ -90,7 +90,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/upload-link", post(crate::sheet_import::upload_link))
         .route("/api/import", post(crate::sheet_import::run_import))
         .route("/api/progress", get(crate::sheet_import::progress))
-        .route("/api/cells", post(crate::orders_write::cells))
+        .route("/api/cells", post(crate::orders_write::cells).layer(axum::extract::DefaultBodyLimit::max(100 * 1024 * 1024)))
         .route("/api/dropdown", post(crate::admin_api::dropdown))
         .route("/api/locks/set", post(crate::admin_api::locks_set))
         .route("/api/views/:action", post(crate::admin_api::views))

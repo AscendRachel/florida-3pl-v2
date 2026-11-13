@@ -143,6 +143,15 @@ pub async fn orders(_u: CurrentUser, State(s): State<AppState>, Json(p): Json<Va
     }
     let offset = num(&p, "offset", 0).max(0);
 
+    // the Find bar (Ctrl+F): where, in this list as it is sorted and filtered, the rows that contain the text are (row positions, counted from 0)
+    if let Some(text) = p.get("find").and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()) {
+        let sql = format!("SELECT idx FROM (SELECT ROW_NUMBER() OVER (ORDER BY {order}) - 1 AS idx, _s FROM orders_text{}) t WHERE _s LIKE ? ESCAPE '|' ORDER BY idx LIMIT 5000", w.sql);
+        let mut args = w.args;
+        args.push(filters::Arg::S(filters::like_arg(text)));
+        let rows = bind_args(sqlx::query(&sql), &args).fetch_all(&s.db).await?;
+        return Ok(Json(json!({ "total": total, "finds": rows.iter().map(|r| r.try_get::<i64, _>(0).unwrap_or(0)).collect::<Vec<_>>() })));
+    }
+
     if p.get("rns_only").is_some_and(|v| v.as_bool().unwrap_or(false) || v.as_i64().unwrap_or(0) != 0) {
         let limit = num(&p, "limit", 1).max(1);
         let sql = format!("SELECT rn FROM orders_text{} ORDER BY {order} LIMIT {limit} OFFSET {offset}", w.sql);

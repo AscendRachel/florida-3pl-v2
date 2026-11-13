@@ -43,7 +43,7 @@ export async function mount(el, params, ctx) {
   // Gift Note (Label Number + Customer Name) used to start hidden: show it once for everyone who had it hidden; their own choice after that is kept
   if (store.get("gt_gift_shown", "") !== "1") { hidden.delete("Gift Note"); store.set("gt_gift_shown", "1"); store.set("gt_orders_hidden", JSON.stringify([...hidden])); }
   const widths = readJson("gt_orders_widths", {});
-  const st = { q: "", card: "", cf: {}, sort: "", dir: "asc", total: 0, act: null, anc: null, edit: null, rowSel: false, keep: new Set() };
+  const st = { q: "", card: "", cf: {}, sort: "", dir: "asc", total: 0, act: null, anc: null, edit: null, rowSel: false, keep: new Set(), find: "", hits: [], hi: -1 };
   // In a filtered view (a Dashboard card, a search, a column filter ...) a row this person changed stays on screen even when the change made it
   // stop matching, with the colour of its new status. It goes away when they change the filter or leave All Orders.
   const filtering = () => !!(st.q || st.card || st.etaday || st.uspsday || Object.keys(st.cf).length);
@@ -82,10 +82,11 @@ export async function mount(el, params, ctx) {
       <span class="muted" id="count"></span>
     </div>
     <div class="fbar" id="fbar">Select a cell</div>
+    <div class="findbar" id="findbar" hidden><input id="fq" type="text" placeholder="Find in all rows" autocomplete="off" spellcheck="false"><span class="muted" id="fcount"></span><button type="button" class="btn small" id="fprev" title="Previous (Shift+Enter)">↑</button><button type="button" class="btn small" id="fnext" title="Next (Enter)">↓</button><button type="button" class="btn small" id="fclose" title="Close (Esc)">✕</button></div>
     <div class="scroller" id="sc" tabindex="0"><div class="inner" id="inner">
       <div class="ghead"><div class="hrow" id="hrow"></div></div>
       <div class="gbody" id="gbody"><div id="rows"></div></div></div></div>
-    <div class="statusbar"><span id="sbL"></span><span id="sbLoad" class="muted" hidden>Loading rows…</span><span class="muted">Type or double-click to edit · Enter saves · Esc cancels · Ctrl+Z undoes · drag the square at a selection's corner to fill down, or past the last row to add rows</span></div></div>`;
+    <div class="statusbar"><span id="sbL"></span><span id="sbLoad" class="muted" hidden>Loading rows…</span><span id="sbSel" class="muted"></span></div></div>`;
 
   const sc = $("#sc"), body = $("#gbody"), rowsEl = $("#rows"), inner = $("#inner");
 
@@ -136,7 +137,9 @@ export async function mount(el, params, ctx) {
     gen++; pages.clear(); inflight.clear();
     st.act = st.anc = null;
     st.rowSel = false;
+    st.cp = null;
     sc.scrollTop = 0;
+    if (!$("#findbar").hidden) findSoon();
     updateBar();
     updateViewsBtn();
     loadPage(0);
@@ -237,6 +240,13 @@ export async function mount(el, params, ctx) {
   });
   sc.addEventListener("scroll", hideHover, { passive: true });
 
+  // the cells last copied (or cut) get a dashed border around the block, like Google Sheets; Esc, a new filter/sort or a reload removes it
+  function copiedCls(r, k) {
+    const b = st.cp;
+    if (!b || r < b.r1 || r > b.r2 || k < b.k1 || k > b.k2) return "";
+    return " cp" + (r === b.r1 ? " cpt" : "") + (r === b.r2 ? " cpb" : "") + (k === b.k1 ? " cpl" : "") + (k === b.k2 ? " cpr" : "");
+  }
+
   function cell(c, v, i, r, rn, sel, cf) {
     const style = `width:${width(c)}px;${i < pinCount ? `left:${lefts[i]}px` : ""}${cf ? `;--cf-bg:${cf.bg};--cf-fg:${cf.fg}` : ""}`;
     let h = "", cls = (i < pinCount ? " pin" : "") + (cf ? " cf" : "");
@@ -253,31 +263,74 @@ export async function mount(el, params, ctx) {
     else h = esc(v.replace(/\s*\n\s*/g, " ⏎ "));
     if (c.kind === "bool" && !v) cls += " ctr", h = `<input type="checkbox" class="cbx" tabindex="-1">`;
     if (sel) cls += st.act.r === r && st.act.k === i ? " a" : " s";
+    cls += copiedCls(r, i);
+    if (st.find && v && String(v).toLowerCase().includes(st.find)) cls += st.hits[st.hi] === r ? " fm fcur" : " fm";
     if (dvMap.has(`${rn}:${c.i}`)) cls += " dd";
     if (why(c, rn)) cls += " ro locked";
     if (c.formula && c.name !== "Gift Note") cls += " calc"; // calculated cells are italic, except Gift Note (it is searched like normal text)
     return `<div class="gc${cls}" data-k="${i}" style="${style}"${c.kind === "text" && v ? ` title="${esc(v)}"` : ""}>${h}</div>`;
   }
 
+  // The markup of one row (index i). `sel` is the selected block, if any.
+  function rowMarkup(i, sel) {
+      const r = rowAt(i);
+      const cfs = r ? formatRow(r) : {};
+      const inRow = sel && i >= sel.r1 && i <= sel.r2;
+      return `<div class="gr${r ? "" : " loading"}" data-r="${i}" style="top:${i * ROW_H}px;width:${geo.total}px"><div class="gc rn${inRow ? " s" : ""}${r && rowLocks.has(r[0]) ? " lk" : ""}" style="width:${RN_W}px"${r && rowLocks.has(r[0]) ? ` title="${esc(lockTip(lockDefs[rowLocks.get(r[0])]))}"` : ""}>${r ? r[0] : ""}</div>${list.map((c, k) => cell(c, r ? r[c.i + 1] : "", k, i, r?.[0], inRow && k >= sel.k1 && k <= sel.k2, cfs[c.key])).join("")}</div>`;
+  }
+
+  // Draws the rows in view. A row whose markup did not change stays in the page as it is (the browser's own Ctrl+F search keeps its
+  // highlights on the rows that stay); only the rows that scrolled into view are added, those that left are removed, and a row whose
+  // content changed (an edit, a selection) is replaced in its place.
   function paint() {
     const top = Math.max(0, sc.scrollTop - HEAD_H - FILT_H);
     const first = Math.max(0, Math.floor(top / ROW_H) - 4);
     const last = Math.min(st.total - 1, Math.ceil((top + sc.clientHeight) / ROW_H) + 4);
     const sel = range();
-    let out = "";
+    const have = new Map();
+    for (const el of rowsEl.children) have.set(+el.dataset.r, el);
+    const tpl = document.createElement("template");
+    const make = (h) => { tpl.innerHTML = h; const n = tpl.content.firstElementChild; n._h = h; return n; };
+    const added = [];
     for (let i = first; i <= last; i++) {
-      const r = rowAt(i);
-      const cfs = r ? formatRow(r) : {};
-      const inRow = sel && i >= sel.r1 && i <= sel.r2;
-      out += `<div class="gr${r ? "" : " loading"}" data-r="${i}" style="top:${i * ROW_H}px;width:${geo.total}px"><div class="gc rn${inRow ? " s" : ""}${r && rowLocks.has(r[0]) ? " lk" : ""}" style="width:${RN_W}px"${r && rowLocks.has(r[0]) ? ` title="${esc(lockTip(lockDefs[rowLocks.get(r[0])]))}"` : ""}>${r ? r[0] : ""}</div>${list.map((c, k) => cell(c, r ? r[c.i + 1] : "", k, i, r?.[0], inRow && k >= sel.k1 && k <= sel.k2, cfs[c.key])).join("")}</div>`;
+      const h = rowMarkup(i, sel), el = have.get(i);
+      if (el) {
+        have.delete(i);
+        if (el._h !== h) el.replaceWith(make(h));
+      } else added.push([i, h]);
     }
-    rowsEl.innerHTML = out;
+    for (const el of have.values()) el.remove(); // rows that scrolled out of view
+    // new rows: the ones above the rows that stayed go in front (last one first), the others go at the end
+    const firstKept = rowsEl.firstElementChild ? +rowsEl.firstElementChild.dataset.r : Infinity;
+    for (let n = added.length - 1; n >= 0; n--) if (added[n][0] < firstKept) rowsEl.insertBefore(make(added[n][1]), rowsEl.firstChild);
+    for (const [i, h] of added) if (i > firstKept) rowsEl.append(make(h));
     wantDriveNames();
     if (last >= first) for (let p = Math.floor(first / PAGE); p <= Math.floor(last / PAGE); p++) loadPage(p);
     placeFill();
   }
 
+  // Lower right, like Google Sheets: when more than one cell is selected, how many of them have a value (a ticked box counts, an unticked one does not).
+  function updateSelCount() {
+    const out = $("#sbSel");
+    if (!out) return;
+    const sel = range();
+    if (!sel || (sel.r1 === sel.r2 && sel.k1 === sel.k2)) { out.textContent = ""; out.title = ""; return; }
+    let filled = 0, missing = false;
+    for (let r = sel.r1; r <= sel.r2; r++) {
+      const row = rowAt(r);
+      if (!row) { missing = true; continue; }
+      for (let k = sel.k1; k <= sel.k2; k++) {
+        const c = list[k], v = row[c.i + 1];
+        if (c.kind === "bool" ? v === "TRUE" : v !== "" && v != null) filled++;
+      }
+    }
+    const cells = (sel.r2 - sel.r1 + 1) * (sel.k2 - sel.k1 + 1);
+    out.textContent = `Count: ${fmt(filled)}${missing ? "+" : ""}`;
+    out.title = `${fmt(filled)}${missing ? "+" : ""} of ${fmt(cells)} selected cells have a value${missing ? ". Rows that are not loaded yet are not counted." : "."}`;
+  }
+
   function updateBar() {
+    updateSelCount();
     const a = st.act, r = a && rowAt(a.r), c = a && list[a.k];
     $("#fbar").textContent = r && c ? `${r[cellCol("Label Number")] || ""} · ${c.name}: ${c.kind === "date" ? showDate(r[c.i + 1]) : r[c.i + 1]}` : "Select a cell";
   }
@@ -319,12 +372,21 @@ export async function mount(el, params, ctx) {
 
   // changes: [{r: row index, k: column position in the visible list, value}]
   async function commit(changes, { record = true } = {}) {
-    // rows that are still loading (blank) cannot be changed: say so, instead of changing only the rows that are there
-    const unloaded = changes.filter((ch) => !rowAt(ch.r));
-    if (unloaded.length) {
-      new Set(unloaded.map((ch) => Math.floor(ch.r / PAGE))).forEach((pg) => loadPage(pg));
-      toast("Some of those rows are still loading, so nothing was changed. Wait for the rows to appear, then try again.", "bad");
-      return false;
+    // rows that are not loaded yet (a long paste or fill reaches past the rows on screen): fetch them first and wait, so the whole
+    // paste lands, not only the part that happened to be loaded
+    const needPages = [...new Set(changes.filter((ch) => !rowAt(ch.r)).map((ch) => Math.floor(ch.r / PAGE)))];
+    if (needPages.length) {
+      toast(`Loading ${fmt(changes.length)} cells' rows before saving…`);
+      const gen0 = gen;
+      needPages.forEach((pg) => loadPage(pg));
+      for (let n = 0; n < 300 && needPages.some((pg) => !pages.has(pg)); n++) {
+        await new Promise((res) => setTimeout(res, 100));
+        needPages.forEach((pg) => { if (!pages.has(pg) && !inflight.has(pg)) loadPage(pg); });
+      }
+      if (gen0 !== gen || changes.some((ch) => !rowAt(ch.r))) {
+        toast("Some of those rows could not be loaded, so nothing was changed. Please try again.", "bad");
+        return false;
+      }
     }
     const items = [], olds = [];
     for (const ch of changes) {
@@ -708,7 +770,7 @@ export async function mount(el, params, ctx) {
     if ((rowDrag || dragging) && Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]) < 4) return; // a click's own jitter is not a drag
     if (rowDrag) {
       const over = cellAt(e.target);
-      if (over && over.r !== st.act.r) { st.act = { r: over.r, k: 0 }; paint(); }
+      if (over && over.r !== st.act.r) { st.act = { r: over.r, k: 0 }; paint(); updateBar(); }
       return;
     }
     if (!dragging) return;
@@ -719,7 +781,7 @@ export async function mount(el, params, ctx) {
       st.act = { r: hit.r, k: hit.k };
       st.anc = anchor;
       st.rowSel = false;
-      paint();
+      paint(); updateBar(); // (the count of the selected cells follows the mouse)
     }
   });
   addEventListener("mouseup", () => { dragging = false; rowDrag = false; });
@@ -738,7 +800,7 @@ export async function mount(el, params, ctx) {
     const a = st.act, mod = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
     if (mod && (key === "c" || key === "x") && a) { // the browser then copies the text box's selection
       const text = blockText();
-      if (text !== null) { cb.value = text; cb.focus(); cb.select(); setTimeout(() => { backToGrid(); if (key === "x") clearRange(); }, 0); }
+      if (text !== null) { cb.value = text; cb.focus(); cb.select(); st.cp = { ...range() }; paint(); setTimeout(() => { backToGrid(); if (key === "x") clearRange(); }, 0); }
       return;
     }
     if (mod && key === "v" && a) { cb.value = ""; cb.focus(); return; } // the paste lands in the text box
@@ -769,7 +831,7 @@ export async function mount(el, params, ctx) {
         if (range() && (range().r2 > range().r1 || range().k2 > range().k1)) { e.preventDefault(); return toggleChecks(); }
         if (list[a.k]?.kind === "bool") { e.preventDefault(); return startEdit(); } break;
       case "Delete": case "Backspace": e.preventDefault(); return clearRange();
-      case "Escape": st.anc = st.act; st.rowSel = false; return paint();
+      case "Escape": st.anc = st.act; st.rowSel = false; st.cp = null; return paint();
     }
     if (!mod && !e.altKey && e.key.length === 1) { e.preventDefault(); startEdit(e.key); }
   });
@@ -824,6 +886,56 @@ export async function mount(el, params, ctx) {
     commit(changes);
   }
 
+  // ---- Find (Ctrl+F). The browser's own find only sees the rows that are drawn (a few dozen of tens of thousands), so All Orders has its own:
+  // the server says which rows contain the text, the highlighted cells show where, and Enter / Shift+Enter jump from one row to the next.
+  const fq = $("#fq"), fbar = $("#findbar");
+  let findGen = 0;
+  function findShow() {
+    const n = st.hits.length;
+    $("#fcount").textContent = !st.find ? "" : n ? `${st.hi + 1} of ${fmt(n)}${n >= 5000 ? "+" : ""}` : "No matches";
+  }
+  function findGo(i) {
+    if (!st.hits.length) { st.hi = -1; findShow(); return paint(); }
+    st.hi = (i + st.hits.length) % st.hits.length;
+    const y = HEAD_H + FILT_H + st.hits[st.hi] * ROW_H;
+    sc.scrollTop = Math.max(0, y - HEAD_H - FILT_H - Math.floor(sc.clientHeight / 3));
+    findShow(); paint();
+  }
+  async function findRun(keepPlace) {
+    const text = fq.value.trim().toLowerCase(), my = ++findGen;
+    st.find = text;
+    if (!text) { st.hits = []; st.hi = -1; findShow(); return paint(); }
+    try {
+      const out = await api("/api/orders", query({ find: text }));
+      if (my !== findGen) return;
+      const was = st.hits[st.hi];
+      st.hits = out.finds;
+      // after a reload of the list (a filter changed) stay near the row that was current; a new text starts at the first match below the top of the screen
+      const from = keepPlace && was != null ? was : Math.max(0, Math.floor(sc.scrollTop / ROW_H) - 2);
+      const at = st.hits.findIndex((h) => h >= from);
+      findGo(at < 0 ? 0 : at);
+    } catch (e) { if (my === findGen) toast(e.message, "bad"); }
+  }
+  const findSoon = debounce(() => findRun(true), 300);
+  const findType = debounce(() => findRun(false), 250);
+  function findOpen() { fbar.hidden = false; fq.focus(); fq.select(); if (fq.value.trim() && !st.find) findRun(false); }
+  function findClose() { fbar.hidden = true; findGen++; st.find = ""; st.hits = []; st.hi = -1; paint(); sc.focus({ preventScroll: true }); }
+  fq.addEventListener("input", findType);
+  fq.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); if (!st.find || fq.value.trim().toLowerCase() !== st.find) findRun(false); else findGo(st.hi + (e.shiftKey ? -1 : 1)); }
+    else if (e.key === "Escape") { e.preventDefault(); findClose(); }
+  });
+  $("#fnext").onclick = () => findGo(st.hi + 1);
+  $("#fprev").onclick = () => findGo(st.hi - 1);
+  $("#fclose").onclick = findClose;
+  const findKey = (e) => {
+    if (!el.isConnected) return document.removeEventListener("keydown", findKey, true);
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "f" && location.hash.split("?")[0] === "#orders" && !document.querySelector(".modal, .dialog, dialog[open]")) {
+      e.preventDefault(); e.stopPropagation(); findOpen();
+    }
+  };
+  document.addEventListener("keydown", findKey, true);
+
   // ---- clipboard: Ctrl+C / Ctrl+X / Ctrl+V on the selected block, as tab-separated text (so it also pastes into Google Sheets or Excel).
   // Browsers only copy and paste through a text box, so a hidden one takes the focus for a moment while the key is handled.
   const cb = document.createElement("textarea");
@@ -862,7 +974,6 @@ export async function mount(el, params, ctx) {
         if (r < st.total && k < list.length) changes.push({ r, k, value });
       }));
     }
-    if (changes.length > 2000) return toast("That is too much to paste at once (limit 2,000 cells).", "bad");
     commit(changes);
   }
 

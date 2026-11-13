@@ -201,7 +201,23 @@ main:has(.sheetpage) { max-width: none; padding-top: 14px; padding-bottom: 20px;
 .gc.s { background: var(--brand-soft); }
 .gc.rn.s { background: var(--brand); color: var(--brand-ink); }
 .gc.a { outline: 2px solid var(--brand); outline-offset: -2px; background: var(--panel); z-index: 4; }
-.gc.pin.a { z-index: 5; }              /* a selected cell scrolls UNDER the frozen columns, never over them */
+.gc.pin.a { z-index: 5; }
+/* Find (Ctrl+F): the cells that contain the text, and the ones in the current match's row */
+.gc.fm { box-shadow: inset 0 0 0 3px #f5c400; }
+.gc.fm.fcur { box-shadow: inset 0 0 0 3px #ff7a00; }
+.gc.pin.fm { box-shadow: inset 0 0 0 3px #f5c400, 1px 0 0 var(--line); }
+.gc.pin.fm.fcur { box-shadow: inset 0 0 0 3px #ff7a00, 1px 0 0 var(--line); }
+.findbar { position: fixed; top: 76px; right: 28px; z-index: 60; display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.35); }
+.findbar[hidden] { display: none; }
+.findbar input { width: 230px; }
+/* the cells last copied: a dashed border around the whole block (each cell draws only the edges that are on the outside) */
+.gc.cp { position: relative; }
+.gc.pin.cp { position: sticky; }
+.gc.cp::before { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 3; box-sizing: border-box; border: 0 dashed var(--ink); }
+.gc.cpt::before { border-top-width: 2px; }
+.gc.cpb::before { border-bottom-width: 2px; }
+.gc.cpl::before { border-left-width: 2px; }
+.gc.cpr::before { border-right-width: 2px; }              /* a selected cell scrolls UNDER the frozen columns, never over them */
 .gc .pill { line-height: 1.5; }
 .gr.gone .gc { opacity: .5; }
 .gr.gone .gc.rn::after { content: "•"; color: var(--warn); margin-left: 2px; }
