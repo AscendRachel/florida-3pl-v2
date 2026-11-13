@@ -210,14 +210,20 @@ main:has(.sheetpage) { max-width: none; padding-top: 14px; padding-bottom: 20px;
 .findbar { position: fixed; top: 76px; right: 28px; z-index: 60; display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.35); }
 .findbar[hidden] { display: none; }
 .findbar input { width: 230px; }
-/* the cells last copied: a dashed border around the whole block (each cell draws only the edges that are on the outside) */
+/* the cells last copied: a dashed black-and-white border around the whole block, which shows on any row colour
+   (each cell draws only the edges that are on the outside of the block) */
 .gc.cp { position: relative; }
 .gc.pin.cp { position: sticky; }
-.gc.cp::before { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 3; box-sizing: border-box; border: 0 dashed var(--ink); }
-.gc.cpt::before { border-top-width: 2px; }
-.gc.cpb::before { border-bottom-width: 2px; }
-.gc.cpl::before { border-left-width: 2px; }
-.gc.cpr::before { border-right-width: 2px; }              /* a selected cell scrolls UNDER the frozen columns, never over them */
+.gc.cp::before { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 3; --t: 0 0; --b: 0 0; --l: 0 0; --r: 0 0;
+  background-image: linear-gradient(90deg, #000 50%, #fff 50%), linear-gradient(90deg, #000 50%, #fff 50%), linear-gradient(0deg, #000 50%, #fff 50%), linear-gradient(0deg, #000 50%, #fff 50%);
+  background-repeat: repeat-x, repeat-x, repeat-y, repeat-y; background-position: 0 0, 0 100%, 0 0, 100% 0; background-size: var(--t), var(--b), var(--l), var(--r); }
+.gc.cpt::before { --t: 10px 3px; }
+.gc.cpb::before { --b: 10px 3px; }
+.gc.cpl::before { --l: 3px 10px; }
+.gc.cpr::before { --r: 3px 10px; }
+/* selected cells / rows: blue stripes and bright blue lines above and below, so the selection shows on every row colour (also magenta, red, yellow ...) */
+.gr .gc.s:not(.rn):not(.a) { background-image: repeating-linear-gradient(135deg, rgba(20,60,220,.42) 0 5px, rgba(20,60,220,.14) 5px 10px); box-shadow: inset 0 2px 0 #1d4ed8, inset 0 -2px 0 #1d4ed8; }
+.gr .gc.pin.s:not(.rn):not(.a) { box-shadow: inset 0 2px 0 #1d4ed8, inset 0 -2px 0 #1d4ed8, 1px 0 0 var(--line); }              /* a selected cell scrolls UNDER the frozen columns, never over them */
 .gc .pill { line-height: 1.5; }
 .gr.gone .gc { opacity: .5; }
 .gr.gone .gc.rn::after { content: "•"; color: var(--warn); margin-left: 2px; }

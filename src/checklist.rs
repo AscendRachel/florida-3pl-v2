@@ -1,5 +1,5 @@
 //! The Team Daily Check List: the daily tasks of the team (each row in the colour of the agent assigned), the ticks of each day,
-//! the numbers the app counts by itself (tasks A, B, D, E, F, G, H, I, O and P; the other tasks are typed), and the two free lists beside it.
+//! the numbers the app counts by itself (tasks A, B, D, E, F, G, H, I, O, P and R; the other tasks are typed), and the two free lists beside it.
 
 use std::collections::HashMap;
 
@@ -14,7 +14,7 @@ use crate::error::{AppError, AppResult};
 use crate::{clock, AppState};
 
 /// The tasks whose number the app counts, and how (shown on the page when the number is hovered).
-const COUNTED: [(&str, &str); 10] = [
+const COUNTED: [(&str, &str); 11] = [
     ("A", "On this day: orders whose empty Source Tracking Number was filled in (by hand or by an Amazon order import)."),
     ("B", "On this day: orders whose Source Order Status changed from In Transit to Delivered, plus the orders an Amazon order import changed to Delivered."),
     ("D", "On this day: orders that were ticked Package Not Received."),
@@ -25,6 +25,7 @@ const COUNTED: [(&str, &str); 10] = [
     ("G", "On this day: rows that were magenta in All Orders and changed to another colour (actioned / resolved)."),
     ("O", "On this day: orders whose empty Brand or Product Image Link was filled with data."),
     ("P", "On this day: orders whose Tracking Status changed from In Transit to Delivered."),
+    ("R", "On this day: magenta rows (Shipped to Customer ticked, Tracking Status Preshipment) whose Tracking Status was changed to In Transit."),
 ];
 const MAX_TEXT: usize = 2000;
 const MAX_ROWS: i64 = 500; // the Additional Task and SKU columns can run this many rows down
@@ -143,6 +144,43 @@ async fn left_colours(s: &AppState, day: NaiveDate) -> AppResult<(i64, i64)> {
         }
     }
     Ok((red, magenta))
+}
+
+/// Task R: magenta rows (Shipped to Customer ticked and Tracking Status Preshipment) whose Tracking Status was changed from Preshipment to In Transit on that day.
+async fn magenta_to_transit(s: &AppState, day: NaiveDate) -> AppResult<i64> {
+    let start = day.and_hms_opt(0, 0, 0).unwrap_or_default();
+    let end = start + Duration::days(1);
+    let rns: Vec<u64> = sqlx::query_scalar(
+        "SELECT DISTINCT rn FROM edit_log WHERE at >= ? AND at < ? AND field = 'tracking_status' AND lower(trim(IFNULL(old_value, ''))) = 'preshipment' AND lower(trim(IFNULL(new_value, ''))) = 'in transit'",
+    )
+    .bind(start)
+    .bind(end)
+    .fetch_all(&s.db)
+    .await?;
+    if rns.is_empty() {
+        return Ok(0);
+    }
+    let sch = s.schema();
+    let c = |h: &str| sch.c(h);
+    let cols = format!("{}, {}, {}, {}, {}", c("Source Order Status"), c("Package Not Received"), c("Shipped to Customer"), c("Delivery Date"), c("Source Order Number"));
+    let today = day.format("%Y-%m-%d").to_string();
+    let mut n = 0;
+    for chunk in rns.chunks(400) {
+        let sql = format!("SELECT rn, {cols} FROM orders_text WHERE rn IN ({})", vec!["?"; chunk.len()].join(","));
+        let mut q = sqlx::query(&sql);
+        for rn in chunk {
+            q = q.bind(*rn);
+        }
+        for row in q.fetch_all(&s.db).await? {
+            let t = |i: usize| row.try_get_unchecked::<String, _>(i).unwrap_or_default();
+            // the row as it was just before the change: the same cells, with the Tracking Status Preshipment
+            let before = RowState { status: t(1), tracking: "Preshipment".into(), not_received: t(2), shipped: t(3), delivery: t(4), order_no: t(5) };
+            if before.colour(&today) == "magenta" {
+                n += 1;
+            }
+        }
+    }
+    Ok(n)
 }
 
 /// Orders whose empty Brand or Product Image Link was filled in on that day.
@@ -267,6 +305,7 @@ pub async fn get(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Has
     n.insert("F", Some(red));
     n.insert("G", Some(magenta));
     n.insert("O", Some(blanks_filled(&s, day).await?));
+    n.insert("R", Some(magenta_to_transit(&s, day).await?));
 
     let out: Vec<Value> = tasks
         .into_iter()

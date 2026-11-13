@@ -827,7 +827,7 @@ export async function mount(el, params, ctx) {
       case "End": e.preventDefault(); return select(mod ? st.total - 1 : a.r, list.length - 1);
       case "Enter": case "F2": e.preventDefault(); return startEdit();
       case " ":
-        if (e.shiftKey) { e.preventDefault(); st.rowSel = true; paint(); return; } // like Sheets: select the whole row
+        if (e.shiftKey || mod) { e.preventDefault(); st.rowSel = true; paint(); updateBar(); return; } // Shift+Space (like Sheets) or Ctrl+Space: select the whole row
         if (range() && (range().r2 > range().r1 || range().k2 > range().k1)) { e.preventDefault(); return toggleChecks(); }
         if (list[a.k]?.kind === "bool") { e.preventDefault(); return startEdit(); } break;
       case "Delete": case "Backspace": e.preventDefault(); return clearRange();
