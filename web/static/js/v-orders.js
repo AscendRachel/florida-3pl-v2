@@ -85,7 +85,7 @@ export async function mount(el, params, ctx) {
     <div class="scroller" id="sc" tabindex="0"><div class="inner" id="inner">
       <div class="ghead"><div class="hrow" id="hrow"></div></div>
       <div class="gbody" id="gbody"><div id="rows"></div></div></div></div>
-    <div class="statusbar"><span id="sbL"></span><span class="muted">Type or double-click to edit · Enter saves · Esc cancels · Ctrl+Z undoes · drag the square at a selection's corner to fill down, or past the last row to add rows</span></div></div>`;
+    <div class="statusbar"><span id="sbL"></span><span id="sbLoad" class="muted" hidden>Loading rows…</span><span class="muted">Type or double-click to edit · Enter saves · Esc cancels · Ctrl+Z undoes · drag the square at a selection's corner to fill down, or past the last row to add rows</span></div></div>`;
 
   const sc = $("#sc"), body = $("#gbody"), rowsEl = $("#rows"), inner = $("#inner");
 
@@ -98,6 +98,7 @@ export async function mount(el, params, ctx) {
   async function loadPage(p) {
     if (pages.has(p) || inflight.has(p)) return;
     inflight.add(p);
+    setLoading();
     const my = gen;
     try {
       const r = await api("/api/orders", query({ offset: p * PAGE, limit: PAGE }));
@@ -111,8 +112,24 @@ export async function mount(el, params, ctx) {
       showCount();
       paint();
     } catch (e) { toast(e.message, "bad"); }
-    finally { inflight.delete(p); }
+    finally { inflight.delete(p); setLoading(); }
   }
+  const setLoading = () => { const n = $("#sbLoad"); if (n) n.hidden = inflight.size === 0; };
+
+  // While the person scrolls, the pages just above and below the ones on screen are fetched in advance (once the scrolling pauses),
+  // so fewer blank rows show. Pages far from the screen are dropped again, to keep a weak PC from filling up with rows.
+  const MAX_PAGES = 50;
+  const prefetchSoon = debounce(() => {
+    if (!st.total) return;
+    const top = Math.max(0, sc.scrollTop - HEAD_H - FILT_H);
+    const p0 = Math.floor(Math.floor(top / ROW_H) / PAGE), p1 = Math.floor(Math.min(st.total - 1, Math.ceil((top + sc.clientHeight) / ROW_H)) / PAGE);
+    const lastPage = Math.floor((st.total - 1) / PAGE);
+    for (const p of [p1 + 1, p1 + 2, p0 - 1]) if (p >= 0 && p <= lastPage) loadPage(p);
+    if (pages.size > MAX_PAGES) {
+      const mid = (p0 + p1) / 2;
+      [...pages.keys()].sort((a, b) => Math.abs(b - mid) - Math.abs(a - mid)).slice(0, pages.size - MAX_PAGES).forEach((k) => pages.delete(k));
+    }
+  }, 150);
 
   function reset() {
     cancelEdit();
@@ -302,6 +319,13 @@ export async function mount(el, params, ctx) {
 
   // changes: [{r: row index, k: column position in the visible list, value}]
   async function commit(changes, { record = true } = {}) {
+    // rows that are still loading (blank) cannot be changed: say so, instead of changing only the rows that are there
+    const unloaded = changes.filter((ch) => !rowAt(ch.r));
+    if (unloaded.length) {
+      new Set(unloaded.map((ch) => Math.floor(ch.r / PAGE))).forEach((pg) => loadPage(pg));
+      toast("Some of those rows are still loading, so nothing was changed. Wait for the rows to appear, then try again.", "bad");
+      return false;
+    }
     const items = [], olds = [];
     for (const ch of changes) {
       const row = rowAt(ch.r), c = list[ch.k];
@@ -1477,7 +1501,7 @@ export async function mount(el, params, ctx) {
   }
 
   // ---- page-level events
-  sc.addEventListener("scroll", () => { closeFilterMenu(); placeEditor(); requestAnimationFrame(paint); });
+  sc.addEventListener("scroll", () => { closeFilterMenu(); placeEditor(); requestAnimationFrame(paint); prefetchSoon(); });
   sc.addEventListener("click", (e) => {
     const fb = e.target.closest("[data-fb]");
     if (!fb) return;
