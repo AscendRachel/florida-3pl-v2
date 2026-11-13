@@ -247,7 +247,7 @@ export async function mount(el, params, ctx) {
     return " cp" + (r === b.r1 ? " cpt" : "") + (r === b.r2 ? " cpb" : "") + (k === b.k1 ? " cpl" : "") + (k === b.k2 ? " cpr" : "");
   }
 
-  function cell(c, v, i, r, rn, sel, cf) {
+  function cell(c, v, i, r, rn, sel, cf, edges = "") {
     const style = `width:${width(c)}px;${i < pinCount ? `left:${lefts[i]}px` : ""}${cf ? `;--cf-bg:${cf.bg};--cf-fg:${cf.fg}` : ""}`;
     let h = "", cls = (i < pinCount ? " pin" : "") + (cf ? " cf" : "");
     if (!v) h = "";
@@ -263,7 +263,7 @@ export async function mount(el, params, ctx) {
     else h = esc(v.replace(/\s*\n\s*/g, " ⏎ "));
     if (c.kind === "bool" && !v) cls += " ctr", h = `<input type="checkbox" class="cbx" tabindex="-1">`;
     if (sel) cls += st.act.r === r && st.act.k === i ? " a" : " s";
-    cls += copiedCls(r, i);
+    cls += copiedCls(r, i) + edges;
     if (st.find && v && String(v).toLowerCase().includes(st.find)) cls += st.hits[st.hi] === r ? " fm fcur" : " fm";
     if (dvMap.has(`${rn}:${c.i}`)) cls += " dd";
     if (why(c, rn)) cls += " ro locked";
@@ -276,7 +276,7 @@ export async function mount(el, params, ctx) {
       const r = rowAt(i);
       const cfs = r ? formatRow(r) : {};
       const inRow = sel && i >= sel.r1 && i <= sel.r2;
-      return `<div class="gr${r ? "" : " loading"}" data-r="${i}" style="top:${i * ROW_H}px;width:${geo.total}px"><div class="gc rn${inRow ? " s" : ""}${r && rowLocks.has(r[0]) ? " lk" : ""}" style="width:${RN_W}px"${r && rowLocks.has(r[0]) ? ` title="${esc(lockTip(lockDefs[rowLocks.get(r[0])]))}"` : ""}>${r ? r[0] : ""}</div>${list.map((c, k) => cell(c, r ? r[c.i + 1] : "", k, i, r?.[0], inRow && k >= sel.k1 && k <= sel.k2, cfs[c.key])).join("")}</div>`;
+      return `<div class="gr${r ? "" : " loading"}" data-r="${i}" style="top:${i * ROW_H}px;width:${geo.total}px"><div class="gc rn${inRow ? " s" : ""}${r && rowLocks.has(r[0]) ? " lk" : ""}" style="width:${RN_W}px"${r && rowLocks.has(r[0]) ? ` title="${esc(lockTip(lockDefs[rowLocks.get(r[0])]))}"` : ""}>${r ? r[0] : ""}</div>${list.map((c, k) => { const on = inRow && k >= sel.k1 && k <= sel.k2; return cell(c, r ? r[c.i + 1] : "", k, i, r?.[0], on, cfs[c.key], on ? (i === sel.r1 ? " sbt" : "") + (i === sel.r2 ? " sbb" : "") + (k === sel.k1 ? " sbl" : "") + (k === sel.k2 ? " sbr" : "") : ""); }).join("")}</div>`;
   }
 
   // Draws the rows in view. A row whose markup did not change stays in the page as it is (the browser's own Ctrl+F search keeps its
