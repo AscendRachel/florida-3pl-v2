@@ -21,7 +21,7 @@ pub type Tx<'a> = Transaction<'a, MySql>;
 const TRUE_WORDS: [&str; 6] = ["true", "yes", "y", "1", "x", "checked"];
 const FALSE_WORDS: [&str; 4] = ["false", "no", "n", "0"];
 /// Ticking one of these stamps the date and time of the tick (clearing it clears the stamp) -> the column that holds the stamp.
-const SHIP_STAMP: [(&str, &str); 4] = [("Shipped to Customer", "SHIPPED TO  CUSTOMER DATE"), ("Shipped to Amazon", "SHIPPED TO  AMAZON DATE"), ("ITEM ON HOLD", "Hold Date"), ("RE-P.O", "RE-P.O Date")];
+const SHIP_STAMP: [(&str, &str); 3] = [("Shipped to Customer", "SHIPPED TO  CUSTOMER DATE"), ("Shipped to Amazon", "SHIPPED TO  AMAZON DATE"), ("ITEM ON HOLD", "Hold Date")];
 /// Shipped to the customer and shipped to Amazon exclude each other: the newest tick wins.
 const SHIP_OTHER: [(&str, &str); 2] = [("Shipped to Customer", "Shipped to Amazon"), ("Shipped to Amazon", "Shipped to Customer")];
 /// The date column stamped by each shipping step -> the kind of ship event.

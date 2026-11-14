@@ -153,7 +153,7 @@ pub async fn dashboard(_u: CurrentUser, State(s): State<AppState>, Query(q): Que
     let counters = json!([
         { "key": "rts", "label": "RTS Counter", "note": "Return to Sender, not yet shipped to Amazon", "n": count(&s, &status("Return to Sender"), &[]).await? },
         { "key": "rta", "label": "RTA Counter", "note": "Return to Amazon, not yet shipped to Amazon", "n": count(&s, &status("Return to Amazon"), &[]).await? },
-        { "key": "repo", "label": "RE-P.O Counter", "note": "RE-P.Os ticked on this day", "href": format!("#orders?repoday={day}"), "n": count(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE {}", on("RE-P.O Date")), &[&day]).await? },
+        { "key": "repo", "label": "RE-P.O Counter", "note": "RE-P.O ticked and Tracking Status still Preshipment, right now", "href": "#orders?show=repo", "n": count(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE {} = 'TRUE' AND {} = 'Preshipment'", c("RE-P.O"), c("Tracking Status")), &[]).await? },
         { "key": "holdc", "label": "Item on Hold Counter", "note": "Items ticked on hold", "n": count(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE {} = 'TRUE'", c("ITEM ON HOLD")), &[]).await? },
         { "key": "storec", "label": "Store Returns Counter", "note": "Store Returns, not yet shipped to Amazon", "n": count(&s, &status("Store Returns"), &[]).await? },
         { "key": "allc", "label": "All Orders Counter", "note": "Orders not yet shipped to the customer", "n": count(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE {has_order} AND {} != 'TRUE'", c("Shipped to Customer")), &[]).await? },
