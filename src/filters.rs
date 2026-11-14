@@ -197,6 +197,10 @@ pub fn build_where(schema: &Schema, p: &Value, skip: Option<usize>) -> AppResult
         args.push(Arg::S(format!("{} 14:00", (day - Duration::days(1)).format("%Y-%m-%d"))));
         args.push(Arg::S(format!("{} 14:00", day.format("%Y-%m-%d"))));
     }
+    // the Dashboard card "RE-P.O Counter": the very rows it counts (the same rule as in dashboard.rs)
+    if st(p, "repo") == "1" {
+        where_.push(format!("{} = 'TRUE' AND {} = 'Preshipment' AND LOWER(TRIM({})) NOT IN ('refunded', 'cancelled', 'for refund', 'unfulfilled')", schema.c("RE-P.O"), schema.c("Tracking Status"), schema.c("Source Order Status")));
+    }
     let card = st(p, "card");
     for (key, _, _, _, col, val) in CARDS {
         if key == card {
