@@ -197,6 +197,11 @@ pub fn build_where(schema: &Schema, p: &Value, skip: Option<usize>) -> AppResult
         args.push(Arg::S(format!("{} 14:00", (day - Duration::days(1)).format("%Y-%m-%d"))));
         args.push(Arg::S(format!("{} 14:00", day.format("%Y-%m-%d"))));
     }
+    // the Dashboard card "RE-P.O Counter": the rows whose RE-P.O was ticked on that day
+    if let Ok(day) = NaiveDate::parse_from_str(&st(p, "repoday"), "%Y-%m-%d") {
+        where_.push(format!("substr({}, 1, 10) = ?", schema.c("RE-P.O Date")));
+        args.push(Arg::S(day.format("%Y-%m-%d").to_string()));
+    }
     let card = st(p, "card");
     for (key, _, _, _, col, val) in CARDS {
         if key == card {

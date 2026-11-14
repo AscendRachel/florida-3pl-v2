@@ -21,7 +21,7 @@ pub type Tx<'a> = Transaction<'a, MySql>;
 const TRUE_WORDS: [&str; 6] = ["true", "yes", "y", "1", "x", "checked"];
 const FALSE_WORDS: [&str; 4] = ["false", "no", "n", "0"];
 /// Ticking one of these stamps the date and time of the tick (clearing it clears the stamp) -> the column that holds the stamp.
-const SHIP_STAMP: [(&str, &str); 3] = [("Shipped to Customer", "SHIPPED TO  CUSTOMER DATE"), ("Shipped to Amazon", "SHIPPED TO  AMAZON DATE"), ("ITEM ON HOLD", "Hold Date")];
+const SHIP_STAMP: [(&str, &str); 4] = [("Shipped to Customer", "SHIPPED TO  CUSTOMER DATE"), ("Shipped to Amazon", "SHIPPED TO  AMAZON DATE"), ("ITEM ON HOLD", "Hold Date"), ("RE-P.O", "RE-P.O Date")];
 /// Shipped to the customer and shipped to Amazon exclude each other: the newest tick wins.
 const SHIP_OTHER: [(&str, &str); 2] = [("Shipped to Customer", "Shipped to Amazon"), ("Shipped to Amazon", "Shipped to Customer")];
 /// The date column stamped by each shipping step -> the kind of ship event.
@@ -250,8 +250,8 @@ pub async fn orders_set(tx: &mut Tx<'_>, sch: &Schema, who: &str, rn: u64, value
     Ok(())
 }
 
-/// A row that is now Delivered is no longer waiting for items: untick ITEM ON HOLD, clear the Hold Date, take out the
-/// partial-delivery note, and stamp the day it arrived. Returns the cells it changed ({header: new value}).
+/// A row that is now Delivered is no longer waiting for items: untick ITEM ON HOLD, clear the Hold Date,
+/// and stamp the day it arrived. Returns the cells it changed ({header: new value}).
 pub async fn delivered_cleanup(tx: &mut Tx<'_>, sch: &Schema, who: &str, rn: u64, note: &str) -> AppResult<Vec<(String, String)>> {
     let mut writes: Vec<(&str, String)> = vec![];
     if read_header(tx, sch, rn, "Delivered to Warehouse Date").await?.is_empty() {
@@ -263,10 +263,7 @@ pub async fn delivered_cleanup(tx: &mut Tx<'_>, sch: &Schema, who: &str, rn: u64
             writes.push(("Hold Date", String::new()));
         }
     }
-    let notes = read_header(tx, sch, rn, "Notes").await?;
-    if partial_note().is_match(&notes) {
-        writes.push(("Notes", without_partial_note(&notes)));
-    }
+    // (the Notes are left as they are: nothing is taken out of them when a row becomes Delivered)
     if writes.is_empty() {
         return Ok(vec![]);
     }
@@ -487,7 +484,7 @@ pub async fn cells(CurrentUser(user): CurrentUser, State(s): State<AppState>, Js
         }
     }
 
-    // Delivered: no longer on hold, and the partial-delivery note goes
+    // Delivered: no longer on hold (the Notes stay)
     for rn in &delivered {
         for (h, val) in delivered_cleanup(&mut tx, &sch, &user.name, *rn, "Row became Delivered").await? {
             if let Some(cj) = sch.at(&h) {

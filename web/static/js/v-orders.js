@@ -46,7 +46,7 @@ export async function mount(el, params, ctx) {
   const st = { q: "", card: "", cf: {}, sort: "", dir: "asc", total: 0, act: null, anc: null, edit: null, rowSel: false, keep: new Set(), find: "", hits: [], hi: -1 };
   // In a filtered view (a Dashboard card, a search, a column filter ...) a row this person changed stays on screen even when the change made it
   // stop matching, with the colour of its new status. It goes away when they change the filter or leave All Orders.
-  const filtering = () => !!(st.q || st.card || st.etaday || st.uspsday || Object.keys(st.cf).length);
+  const filtering = () => !!(st.q || st.card || st.etaday || st.uspsday || st.repoday || Object.keys(st.cf).length);
   const pages = new Map(); // page number -> rows
   const inflight = new Set();
   const dvMap = new Map(); // "rn:col" -> id of the dropdown list on that cell
@@ -90,7 +90,7 @@ export async function mount(el, params, ctx) {
 
   const sc = $("#sc"), body = $("#gbody"), rowsEl = $("#rows"), inner = $("#inner");
 
-  const query = (extra = {}) => ({ q: st.q, card: st.card, sort: st.sort, dir: st.dir, flt: st.cf, ...(st.etaday ? { etaday: st.etaday } : {}), ...(st.uspsday ? { uspsday: st.uspsday } : {}), ...(st.keep.size ? { keep: [...st.keep] } : {}), ...extra });
+  const query = (extra = {}) => ({ q: st.q, card: st.card, sort: st.sort, dir: st.dir, flt: st.cf, ...(st.etaday ? { etaday: st.etaday } : {}), ...(st.uspsday ? { uspsday: st.uspsday } : {}), ...(st.repoday ? { repoday: st.repoday } : {}), ...(st.keep.size ? { keep: [...st.keep] } : {}), ...extra });
   const rowAt = (i) => pages.get(Math.floor(i / PAGE))?.[i % PAGE];
   const countText = () => `${fmt(st.total)} order${st.total === 1 ? "" : "s"}${nFilters() ? ` · ${nFilters()} column filter${nFilters() === 1 ? "" : "s"}` : ""}`;
   // (a page that answers after the person has already left All Orders finds nothing to write to: that is not an error)
@@ -1213,6 +1213,8 @@ export async function mount(el, params, ctx) {
   async function checkForChanges() {
     if (!el.isConnected || location.hash.split("?")[0] !== "#orders") return clearInterval(poll);
     if (document.hidden || st.edit || dd || fm || dragging) return;
+    // a filtered view is locked, like a filter in Google Sheets: nothing is added, removed or moved until the screen is refreshed (or the filter changes)
+    if (filtering()) return;
     try {
       const { v } = await api("/api/version");
       if (knownV === null) knownV = v;
@@ -1638,7 +1640,7 @@ export async function mount(el, params, ctx) {
     const card = e.target.closest("[data-card]");
     if (card) { st.card = card.dataset.card === "all" ? "" : card.dataset.card; st.keep.clear(); renderCards(); return reset(); }
     if (e.target.closest("#clear")) {
-      st.q = ""; st.card = ""; st.cf = {}; st.etaday = ""; st.uspsday = ""; st.keep.clear(); $("#q").value = ""; showEtaNote();
+      st.q = ""; st.card = ""; st.cf = {}; st.etaday = ""; st.uspsday = ""; st.repoday = ""; st.keep.clear(); $("#q").value = ""; showEtaNote();
       renderCards(); drawHead();
       return reset();
     }
@@ -1763,15 +1765,16 @@ export async function mount(el, params, ctx) {
   // coming from the Team Daily Check List card of the estimated delivery dates changed on a day
   const showEtaNote = () => {
     let n = $("#etaNote");
-    if (!st.etaday && !st.uspsday) return void n?.remove();
+    if (!st.etaday && !st.uspsday && !st.repoday) return void n?.remove();
     if (!n) { n = document.createElement("div"); n.id = "etaNote"; n.className = "hint"; n.style.cssText = "margin:4px 0"; $("#fbar").before(n); }
-    n.textContent = st.uspsday
+    n.textContent = st.repoday ? `Showing only the orders whose RE-P.O was ticked on ${st.repoday}. Clear filters shows every order again.` : st.uspsday
       ? `Showing only the packages picked up by USPS on ${st.uspsday}: shipped to the customer from 2:00 PM the day before until 1:59 PM. Clear filters shows every order again.`
       : `Showing only the orders whose estimated Delivery Date was moved on ${st.etaday}. Clear filters shows every order again.`;
   };
   st.etaday = /^\d{4}-\d\d-\d\d$/.test(params.get("etaday") || "") ? params.get("etaday") : "";
   st.uspsday = /^\d{4}-\d\d-\d\d$/.test(params.get("uspsday") || "") ? params.get("uspsday") : "";
-  if (st.etaday || st.uspsday) { st.q = ""; st.card = ""; st.sort = ""; st.dir = "asc"; $("#q").value = ""; st.cf = {}; }
+  st.repoday = /^\d{4}-\d\d-\d\d$/.test(params.get("repoday") || "") ? params.get("repoday") : "";
+  if (st.etaday || st.uspsday || st.repoday) { st.q = ""; st.card = ""; st.sort = ""; st.dir = "asc"; $("#q").value = ""; st.cf = {}; }
   showEtaNote();
   // coming from a notification: search for that order and pick out the row (and the note's cell)
   const wantRow = +params.get("row") || 0;
