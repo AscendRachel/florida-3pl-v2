@@ -1764,9 +1764,9 @@ export async function mount(el, params, ctx) {
   }
   // coming from the Dashboard card "RE-P.O Counter": RE-P.O ticked and the Tracking Status still Preshipment
   const rePoCol = cols.find((c) => c.key === "RE-P.O");
-  if (params.get("show") === "repo" && rePoCol && trackCol) {
+  if (params.get("show") === "repo" && rePoCol && trackCol && statusCol) {
     st.q = ""; st.card = ""; st.sort = ""; st.dir = "asc"; $("#q").value = "";
-    st.cf = { [rePoCol.i]: { c: null, v: { mode: "in", list: ["TRUE"] }, k: null }, [trackCol.i]: { c: null, v: { mode: "in", list: ["Preshipment"] }, k: null } };
+    st.cf = { [rePoCol.i]: { c: null, v: { mode: "in", list: ["TRUE"] }, k: null }, [trackCol.i]: { c: null, v: { mode: "in", list: ["Preshipment"] }, k: null }, [statusCol.i]: { c: null, v: { mode: "out", list: ["Refunded", "Cancelled", "For Refund", "Unfulfilled"] }, k: null } };
   }
   // coming from the Team Daily Check List card of the estimated delivery dates changed on a day
   const showEtaNote = () => {
