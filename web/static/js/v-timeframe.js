@@ -66,14 +66,22 @@ export async function mount(el) {
     if (e.target.closest("#tfnext") && data && st.page < data.pages) { st.page++; load(); }
   });
 
-  // an order that is dealt with leaves the table (it comes back only if its ETA moves again)
+  // an order that is dealt with leaves the table at once (it comes back only if its ETA moves again; the Undo button puts it back).
+  // The row goes away the moment Resolve is clicked, not after the table has been fetched again, and a second click on it does nothing.
+  const resolving = new Set();
   async function resolve(rn, order) {
-    if (!(await confirmBox("Resolve " + order + "?", "It is removed from this table. It comes back only if its ETA moves again (the First ETA stays the original one).", "Resolve"))) return;
+    if (resolving.has(rn)) return;
+    resolving.add(rn);
+    const before = data;
+    data = { ...data, items: data.items.filter((r) => r.rn !== rn), total: Math.max(0, data.total - 1) };
+    draw();
     try {
       const out = await api("/api/timeframe/resolve", { rn });
       $("#tfnote").innerHTML = `<div class="banner" style="margin:8px 0">Resolved <b class="mono">${esc(order)}</b>. <button class="btn small" data-undo="${rn}" data-prev="${out.prev ?? ""}">Undo</button></div>`;
-      await load();
-    } catch (e) { toast(e.message, "bad"); }
+    } catch (err) {
+      data = before; draw(); toast(err.message, "bad"); // it was not saved: the row comes back
+    } finally { resolving.delete(rn); }
+    load(); // fill the page up again from the server
   }
   async function undo(rn, prev) {
     try {

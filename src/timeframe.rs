@@ -28,8 +28,8 @@ pub async fn list(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Ha
          SUBSTRING_INDEX(GROUP_CONCAT(CASE WHEN trim(IFNULL(e.old_value, '')) <> '' THEN trim(e.old_value) ELSE trim(IFNULL(e.new_value, '')) END ORDER BY e.id SEPARATOR '|'), '|', 1) AS first_eta \
          FROM edit_log e WHERE e.field = 'delivery_date' GROUP BY e.rn) a ON a.rn = o.rn LEFT JOIN timeframe_resolved r ON r.rn = o.rn";
 
-    // only the orders that meet the rule: the ETA was moved to another date at least once
-    let mut where_ = vec![format!("o.{son} <> ''"), "IFNULL(a.changes, 0) > 0".to_string(), "a.last_change > IFNULL(r.up_to_id, 0)".to_string()];
+    // only the orders that meet the rule: the ETA was moved to another date at least once, and the Tracking Status is still Preshipment
+    let mut where_ = vec![format!("o.{son} <> ''"), "IFNULL(a.changes, 0) > 0".to_string(), "a.last_change > IFNULL(r.up_to_id, 0)".to_string(), format!("o.{} = 'Preshipment'", sch.c("Tracking Status"))];
     let mut args: Vec<String> = vec![];
     let term = q.get("q").map(|t| t.trim()).unwrap_or("");
     if !term.is_empty() {
