@@ -105,6 +105,20 @@ pub async fn all_names(db: &MySqlPool) -> anyhow::Result<HashMap<String, (String
     Ok(rows.into_iter().map(|(i, n, t)| (i, (n, t))).collect())
 }
 
+/// The same, for just the files asked about (at most 80 at a time). The page asks over and over while it is scrolled, so this must not
+/// read the whole table each time.
+async fn names_of(db: &MySqlPool, ids: &[String]) -> anyhow::Result<HashMap<String, (String, NaiveDateTime)>> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let sql = format!("SELECT CAST(id AS CHAR), CAST(name AS CHAR), read_at FROM drive_names WHERE id IN ({})", vec!["?"; ids.len()].join(","));
+    let mut q = sqlx::query_as::<_, (String, String, NaiveDateTime)>(&sql);
+    for id in ids {
+        q = q.bind(id);
+    }
+    Ok(q.fetch_all(db).await?.into_iter().map(|(i, n, t)| (i, (n, t))).collect())
+}
+
 async fn save(db: &MySqlPool, fid: &str, name: &str) {
     let _ = sqlx::query("INSERT INTO drive_names (id, name, read_at) VALUES (?,?,?) ON DUPLICATE KEY UPDATE name = VALUES(name), read_at = VALUES(read_at)").bind(fid).bind(name).bind(clock::now()).execute(db).await;
 }
@@ -113,7 +127,7 @@ async fn save(db: &MySqlPool, fid: &str, name: &str) {
 pub async fn names(drive: &Arc<Drive>, db: &MySqlPool, ids: Vec<String>) -> anyhow::Result<Value> {
     let mut seen = HashSet::new();
     let ids: Vec<String> = ids.into_iter().filter(|i| id_ok(i) && seen.insert(i.clone())).take(80).collect();
-    let known = all_names(db).await?;
+    let known = names_of(db, &ids).await?;
     let now = clock::now();
     let (mut got, mut pending) = (serde_json::Map::new(), 0);
     for id in ids {
