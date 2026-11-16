@@ -8,6 +8,7 @@
 mod admin_api;
 mod amazon;
 mod auth;
+mod cache;
 mod cformat;
 mod checklist;
 mod clock;
@@ -61,6 +62,8 @@ pub struct AppState {
     pub uploads: sheet_import::Uploads,
     /// What a long import step is doing right now, by the token the page made.
     pub progress: sheet_import::Progress,
+    /// Short-lived copies of read-only answers (the Dashboard, the All Orders totals).
+    pub cache: Arc<cache::Caches>,
 }
 
 impl AppState {
@@ -148,6 +151,7 @@ async fn main() -> anyhow::Result<()> {
         amazon_plans: Arc::default(),
         uploads: Arc::default(),
         progress: Arc::default(),
+        cache: Arc::default(),
     };
     // files uploaded but never imported are removed at start
     if let Ok(rd) = std::fs::read_dir(std::path::Path::new(&state.config.data_dir).join("uploads")) {

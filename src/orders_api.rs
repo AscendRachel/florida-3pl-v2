@@ -117,7 +117,18 @@ pub async fn orders(_u: CurrentUser, State(s): State<AppState>, Json(p): Json<Va
     prepare_dups(&s, &p, None).await?;
     let sch = s.schema();
     let w = filters::build_where(&sch, &p, None)?;
-    let total: i64 = bind_args(sqlx::query(&format!("SELECT COUNT(*) FROM orders_text{}", w.sql)), &w.args).fetch_one(&s.db).await?.try_get(0)?;
+    // the "N orders" of one filter is counted once per data version: every page of that filter, and every viewer of it, share the count
+    // until any order changes (and for at most 30 seconds, because some row colours depend on the clock)
+    let ver = s.version_now();
+    let key = format!("{}\x01{}", w.sql, w.args.iter().map(|a| match a { filters::Arg::S(x) => x.clone(), filters::Arg::F(f) => f.to_string() }).collect::<Vec<_>>().join("\x01"));
+    let total: i64 = match s.cache.total_get(&key, ver) {
+        Some(n) => n,
+        None => {
+            let n: i64 = bind_args(sqlx::query(&format!("SELECT COUNT(*) FROM orders_text{}", w.sql)), &w.args).fetch_one(&s.db).await?.try_get(0)?;
+            s.cache.total_put(key, ver, n);
+            n
+        }
+    };
 
     let sort = p.get("sort").and_then(Value::as_str).unwrap_or("");
     let desc = p.get("dir").and_then(Value::as_str) == Some("desc");

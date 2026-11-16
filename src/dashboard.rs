@@ -62,6 +62,7 @@ pub async fn save_operators(_a: AdminUser, State(s): State<AppState>, Json(b): J
     }
     let json = operators_json(&out);
     settings::put(&s.db, "dashboard", &json!({ "operators": json })).await?;
+    s.cache.clear_dashboard().await; // the new list shows at once
     Ok(Json(json!({ "operators": json })))
 }
 
@@ -113,7 +114,25 @@ async fn count(s: &AppState, sql: &str, args: &[&str]) -> AppResult<i64> {
     Ok(q.fetch_one(&s.db).await?.try_get_unchecked::<i64, _>(0).unwrap_or(0))
 }
 
-pub async fn dashboard(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Json<Value>> {
+/// The Dashboard's numbers are shared for a few seconds: everybody who opens it (or whose open page reloads after a change) in that time
+/// gets the same answer, and the database counts once instead of once per viewer.
+pub async fn dashboard(u: CurrentUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Json<Value>> {
+    let key = q.get("date").cloned().unwrap_or_default();
+    let mut held = s.cache.dashboard.lock().await;
+    if let Some((at, v)) = held.get(&key) {
+        if at.elapsed() < crate::cache::DASHBOARD_TTL {
+            return Ok(Json(v.clone()));
+        }
+    }
+    let Json(v) = compute(u, State(s.clone()), Query(q)).await?;
+    if held.len() >= crate::cache::max_entries() {
+        held.clear();
+    }
+    held.insert(key, (std::time::Instant::now(), v.clone()));
+    Ok(Json(v))
+}
+
+async fn compute(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Json<Value>> {
     let sch = s.schema();
     let day = q.get("date").filter(|d| !d.is_empty()).cloned().unwrap_or_else(|| clock::now().format("%Y-%m-%d").to_string());
     if day.len() != 10 || NaiveDate::parse_from_str(&day, "%Y-%m-%d").is_err() {
