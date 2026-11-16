@@ -3,7 +3,8 @@ import { showDay, showTime } from "./chat-bubble.js";
 import { $, api, brand, debounce, esc, fmt, toast } from "./util.js";
 
 export async function mount(el, params, ctx) {
-  const st = { date: "", user: "", q: "", all: false };
+  // opens on every date (newest first): a page that starts on today only looks empty at the start of each day
+  const st = { date: "", user: "", q: "", all: true };
   let data = null, known = null;
 
   el.innerHTML = `<div class="section-head"><div><div class="eyebrow">${esc(brand.name)}</div><h2>Work Log</h2>
@@ -28,7 +29,7 @@ export async function mount(el, params, ctx) {
     $("#wlCount").textContent = n ? `${fmt(n)} message${n === 1 ? "" : "s"}${shown < n ? ` (showing the newest ${fmt(shown)})` : ""}` : "";
     $("#wlRows").innerHTML = data.items.length
       ? data.items.map((m) => `<tr><td class="wl-date">${esc(showDay(m.at))}</td><td class="wl-time">${esc(showTime(m.at))}</td><td class="wl-who"><b>${esc(m.name || m.username)}</b></td><td class="wl-text">${esc(m.text).replace(/\n/g, "<br>")}</td></tr>`).join("")
-      : `<tr><td colspan="4" class="empty">${st.q || st.user || st.all ? "No messages match." : "No messages on this date."}</td></tr>`;
+      : `<tr><td colspan="4" class="empty">${st.q || st.user || st.all ? "No messages match." : "No messages on this date. Press All dates to see the older ones."}</td></tr>`;
   }
   async function load() {
     data = await api(query());
