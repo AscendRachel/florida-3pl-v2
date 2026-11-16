@@ -8,7 +8,7 @@
 //!   Source Tracking Number  the Carrier Tracking # (a row that ships in several parcels lists them separated by |)
 //!   Source Order Status     from Delivery Status: Delivered / In Transit. (Unfulfilled is a row with no Amazon order number; the file never sets it.)
 //!   Brand                   the product's Brand (or Manufacturer), only into an EMPTY Brand cell; also on finished rows
-//!   Delivery Date           from the file's expected delivery date, when the row has none or Amazon moved the date
+//!   Delivery Date           from the file's expected delivery date, when the row has none or Amazon moved it later (an earlier date in the file never replaces the one in All Orders)
 //!   Delivered to Warehouse Date  when the row becomes Delivered: that same date
 //! Rows that are already Delivered, Refunded, For Refund or Cancelled are left exactly as they are (tracking and status), because a
 //! month's file lists finished orders again. Several items of one Store Order No. that arrive on different days are Partially
@@ -333,8 +333,11 @@ pub fn build_plan(rows: &[OrderRow], lines: &[Line]) -> Plan {
         }
         let est = got.iter().filter(|l| !l.eta.is_empty()).map(|l| l.eta.clone()).max().unwrap_or_default(); // the date Amazon now gives for this row
         est_of.insert(*rn, est.clone());
-        if !est.is_empty() && r.ddate.chars().take(10).collect::<String>() != est {
-            ch.push(("Delivery Date".into(), est)); // empty, or Amazon moved it
+        // the file's date is written when the row has none or Amazon moved it LATER; an earlier date in the file never replaces the one
+        // already in All Orders (the Amazon report and the Amazon dashboard do not always agree, and the later date is the one to trust)
+        let cur_date: String = r.ddate.chars().take(10).collect();
+        if !est.is_empty() && (cur_date.is_empty() || est > cur_date) {
+            ch.push(("Delivery Date".into(), est)); // empty, or Amazon moved it later
         }
         if merged != tokens(&r.tracking, false) {
             ch.push(("Source Tracking Number".into(), merged.join(SEP))); // also rewrites a cell that Excel had turned into 5.4E11
