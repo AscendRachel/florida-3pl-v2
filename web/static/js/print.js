@@ -43,9 +43,48 @@ export async function labelPages(url) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     // intent "print" draws without waiting for animation frames, so it also works when the tab is in the background
     await page.render({ canvasContext: ctx, viewport: vp, intent: "print" }).promise;
-    pages.push({ img: canvas.toDataURL("image/png"), wIn: (size.width * grow) / 72, hIn: (size.height * grow) / 72 });
+    const wIn = (size.width * grow) / 72, hIn = (size.height * grow) / 72;
+    // Some carriers (FedEx, ...) give a Letter or A4 page with the 4 x 6 label drawn small on it. Printed as it is, the label comes out tiny.
+    // Such a page is cropped to what is drawn on it and fitted onto a 4 x 6 inch page.
+    const fitted = wIn > 4.6 || hIn > 6.6 ? fitTo4x6(canvas) : null;
+    pages.push(fitted || { img: canvas.toDataURL("image/png"), wIn, hIn });
   }
   return pages;
+}
+
+// Crop a canvas to its non-white content and centre it, as large as it fits, on a 4 x 6 inch (1200 x 1800 px) white page.
+// A label that is wider than tall is turned to stand upright. Returns null when the page is blank.
+function fitTo4x6(src) {
+  const w = src.width, h = src.height;
+  const d = src.getContext("2d").getImageData(0, 0, w, h).data;
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) {
+    const row = y * w * 4;
+    for (let x = 0; x < w; x++) {
+      const i = row + x * 4;
+      if (d[i] < 235 || d[i + 1] < 235 || d[i + 2] < 235) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  if (x1 < 0) return null;
+  const pad = 12; // a little white round the content
+  x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(w - 1, x1 + pad); y1 = Math.min(h - 1, y1 + pad);
+  const cw = x1 - x0 + 1, ch = y1 - y0 + 1;
+  const out = document.createElement("canvas");
+  out.width = 1200; out.height = 1800;
+  const c = out.getContext("2d");
+  c.fillStyle = "#fff";
+  c.fillRect(0, 0, 1200, 1800);
+  const margin = 30; // 0.1 inch
+  const k = Math.min((1200 - 2 * margin) / cw, (1800 - 2 * margin) / ch);
+  const dw = cw * k, dh = ch * k;
+  c.imageSmoothingQuality = "high";
+  c.drawImage(src, x0, y0, cw, ch, (1200 - dw) / 2, margin, dw, dh); // from the top, as a label sits at the top of its sheet
+  return { img: out.toDataURL("image/png"), wIn: 4, hIn: 6 };
 }
 
 // Print some HTML on pages of the given size (inches). Resolves once the print dialog was handled.

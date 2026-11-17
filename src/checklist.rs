@@ -14,7 +14,7 @@ use crate::error::{AppError, AppResult};
 use crate::{clock, AppState};
 
 /// The tasks whose number the app counts, and how (shown on the page when the number is hovered).
-const COUNTED: [(&str, &str); 11] = [
+const COUNTED: [(&str, &str); 10] = [
     ("A", "On this day: orders whose empty Source Tracking Number was filled in (by hand or by an Amazon order import)."),
     ("B", "On this day: orders whose Source Order Status changed from In Transit to Delivered, plus the orders an Amazon order import changed to Delivered."),
     ("D", "On this day: orders that were ticked Package Not Received."),
@@ -22,7 +22,6 @@ const COUNTED: [(&str, &str); 11] = [
     ("H", "On this day: pink rows (For Refund) whose Source Order Status was changed to Refunded."),
     ("I", "On this day: orders whose Source Order Status was changed to Cancelled."),
     ("F", "On this day: rows that were red in All Orders and changed to another colour (actioned / resolved)."),
-    ("G", "On this day: rows that were magenta in All Orders and changed to another colour (actioned / resolved)."),
     ("O", "On this day: orders whose empty Brand or Product Image Link was filled with data."),
     ("P", "On this day: orders whose Tracking Status changed from In Transit to Delivered."),
     ("R", "On this day: magenta rows (Shipped to Customer ticked, Tracking Status Preshipment) whose Tracking Status was changed to In Transit."),
@@ -301,9 +300,8 @@ pub async fn get(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Has
     n.insert("H", Some(status_to(&s, day, Some("For Refund"), "Refunded", false).await?));
     n.insert("I", Some(status_to(&s, day, None, "Cancelled", false).await?));
     n.insert("P", Some(changes(&s, day, "tracking_status", Some("In Transit"), "Delivered").await?));
-    let (red, magenta) = left_colours(&s, day).await?;
+    let (red, _magenta) = left_colours(&s, day).await?; // G (magenta) is typed in by hand, not counted
     n.insert("F", Some(red));
-    n.insert("G", Some(magenta));
     n.insert("O", Some(blanks_filled(&s, day).await?));
     n.insert("R", Some(magenta_to_transit(&s, day).await?));
 
