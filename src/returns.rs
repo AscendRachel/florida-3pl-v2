@@ -398,8 +398,9 @@ fn words(s: &str) -> HashSet<String> {
 
 async fn return_settings(s: &AppState) -> AppResult<Map<String, Value>> {
     let mut out: Map<String, Value> = serde_json::from_value(json!({
-        "source_url": "https://docs.google.com/spreadsheets/d/1aBeg0dhwkBGBvC5H3CbTP_LUXlmBUDo6xiGfxn0mKh0/edit", "source_tab": "RETURNS", "warehouse": "FLORIDA", "interval_min": 30,
-        "seed_url": "https://docs.google.com/spreadsheets/d/1M_1k_91nymXWt0SDt3aS5ZCaC8k3rr-hdos1qQee97M/edit", "seed_tab": "RETURNS",
+        // the sheet links are NOT kept in the code (this repository is public): an admin types them into Sync Settings, and they are stored in the database
+        "source_url": "", "source_tab": "RETURNS", "warehouse": "FLORIDA", "interval_min": 30,
+        "seed_url": "", "seed_tab": "RETURNS",
     }))?;
     if let Some(Value::Object(m)) = settings::get(&s.db, "returns.settings").await? {
         out.extend(m);
@@ -802,6 +803,9 @@ pub async fn sync(s: &AppState, trigger: &str) -> AppResult<Value> {
 async fn sync_inner(s: &AppState, trigger: &str, cfg: &Map<String, Value>, read: &mut usize) -> AppResult<Value> {
     let (mut added, mut updated, mut removed) = (0, 0, 0);
     let mut notes: Vec<String> = vec![];
+    if text_of(&cfg["source_url"]).trim().is_empty() {
+        return Err(AppError::bad("No master sheet link is set yet. Paste it in Sync Settings (Returns) and save."));
+    }
     let master = records(&fetch_csv(&text_of(&cfg["source_url"]), &text_of(&cfg["source_tab"])).await?, Some(&text_of(&cfg["warehouse"])))?;
     *read = master.len();
     let first_time = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM returns").fetch_one(&s.db).await? == 0;
@@ -885,8 +889,8 @@ pub fn start_scheduler(s: AppState) {
             tokio::time::sleep(Duration::from_secs(20)).await;
             let Ok(cfg) = return_settings(&s).await else { continue };
             let interval = cfg["interval_min"].as_i64().unwrap_or(0);
-            if interval == 0 {
-                continue;
+            if interval == 0 || text_of(&cfg["source_url"]).trim().is_empty() {
+                continue; // timed sync is off, or there is no sheet link yet
             }
             if last.is_none() {
                 if let Ok(Some(at)) = sqlx::query_scalar::<_, NaiveDateTime>("SELECT at FROM returns_sync_log ORDER BY id DESC LIMIT 1").fetch_optional(&s.db).await {
