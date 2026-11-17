@@ -46,10 +46,14 @@ export async function labelPages(url) {
     const wIn = (size.width * grow) / 72, hIn = (size.height * grow) / 72;
     // Some carriers (FedEx, ...) give a Letter or A4 page with the 4 x 6 label drawn small on it. Printed as it is, the label comes out tiny.
     // Such a page is cropped to what is drawn on it and fitted onto a 4 x 6 inch page.
-    const fitted = wIn > 4.6 || hIn > 6.6 ? fitTo4x6(canvas) : null;
-    pages.push(fitted || { img: canvas.toDataURL("image/png"), wIn, hIn });
+    const big = wIn > 4.6 || hIn > 6.6;
+    const fitted = big ? fitTo4x6(canvas) : null;
+    pages.push({ ...(fitted || { img: canvas.toDataURL("image/png"), wIn, hIn }), big });
   }
-  return pages;
+  // A PDF that mixes sizes (for example FedEx: an A4 sheet, then the 4 x 6 label, then another A4 sheet) holds the label on the label-sized
+  // page; the big pages are paperwork. Only the label-sized pages are printed then, so the paper size stays 4 x 6.
+  const small = pages.filter((p) => !p.big);
+  return small.length && small.length < pages.length ? small : pages;
 }
 
 // Crop a canvas to its non-white content and centre it, as large as it fits, on a 4 x 6 inch (1200 x 1800 px) white page.
