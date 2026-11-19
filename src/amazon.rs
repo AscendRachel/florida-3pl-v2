@@ -5,7 +5,8 @@
 //! (the row's Product Name), so the right row gets the right tracking number.
 //!
 //! What it writes, per row:
-//!   Source Tracking Number  the Carrier Tracking # (a row that ships in several parcels lists them separated by |)
+//!   Source Tracking Number  the Carrier Tracking # the file lists for the row, which REPLACES the one the row had (Amazon changes tracking numbers);
+//!                           a row the file lists on 2 lines (2 parcels) gets both, separated by |; no tracking in the file for the row: kept as it is
 //!   Source Order Status     from Delivery Status: Delivered / In Transit. (Unfulfilled is a row with no Amazon order number; the file never sets it.)
 //!   Brand                   the product's Brand (or Manufacturer), only into an EMPTY Brand cell; also on finished rows
 //!   Delivery Date           from the file's expected delivery date, when the row has none or Amazon moved it later (an earlier date in the file never replaces the one in All Orders)
@@ -289,12 +290,17 @@ pub fn build_plan(rows: &[OrderRow], lines: &[Line]) -> Plan {
             }
             continue;
         }
-        let have = tokens(&r.tracking, true);
-        let mut merged = have.clone();
+        // The tracking numbers of the row are the ones the file lists for it now: Amazon changes a tracking number after it gave a first one,
+        // so a new number REPLACES the old one. A row the file lists on 2 lines (shipped in 2 parcels) gets both numbers. When the file gives
+        // no tracking number for the row yet, what the row already has is kept.
+        let mut merged: Vec<String> = vec![];
         for l in got {
             if !l.tracking.is_empty() && !merged.contains(&l.tracking) {
                 merged.push(l.tracking.clone());
             }
+        }
+        if merged.is_empty() {
+            merged = tokens(&r.tracking, true);
         }
         let states: Vec<&str> = got.iter().map(|l| line_state(l)).collect();
         // An order line can hold 2 of the same product that ship separately: the row is Delivered only when the delivered quantity covers
@@ -547,4 +553,42 @@ pub async fn apply(CurrentUser(me): CurrentUser, State(s): State<AppState>, Json
     s.bump();
     let sm = &plan.summary;
     Ok(Json(json!({ "ok": true, "rows": plan.changes.len() - skipped, "tracking_added": sm["tracking_added"], "status_changed": sm["status_changed"], "dates_changed": sm["dates_changed"], "brands_added": sm["brands_added"] })))
+}
+
+#[cfg(test)]
+mod tracking_tests {
+    use super::*;
+
+    fn row(rn: u64, tracking: &str) -> OrderRow {
+        OrderRow { rn, order: "113-1".into(), tracking: tracking.into(), status: "In Transit".into(), title: "Chair".into(), store: String::new(), label: String::new(), qty: "1".into(), items: String::new(), ddate: String::new(), brand: String::new() }
+    }
+    fn line(tracking: &str) -> Line {
+        Line { order: "113-1".into(), title: "Chair".into(), tracking: tracking.into(), delivery: "Not Delivered".into(), shipment: "Shipped".into(), eta: String::new(), eta_column: None, brand: String::new(), qty: 1 }
+    }
+    fn tracking_of(p: &Plan, rn: u64) -> Option<String> {
+        p.changes.get(&rn).and_then(|c| c.changes.iter().find(|(k, _)| k == "Source Tracking Number").map(|(_, v)| v.clone()))
+    }
+
+    #[test]
+    fn one_line_replaces_the_old_number() {
+        let p = build_plan(&[row(1, "TBA336520157146")], &[line("TBA336586467199")]);
+        assert_eq!(tracking_of(&p, 1).as_deref(), Some("TBA336586467199"));
+    }
+    #[test]
+    fn two_lines_give_both_numbers() {
+        let p = build_plan(&[row(1, "TBA1")], &[line("TBA2"), line("TBA3")]);
+        assert_eq!(tracking_of(&p, 1).as_deref(), Some("TBA2|TBA3"));
+    }
+    #[test]
+    fn two_lines_one_of_them_changed() {
+        let p = build_plan(&[row(1, "TBA2|TBA3")], &[line("TBA2"), line("TBA9")]);
+        assert_eq!(tracking_of(&p, 1).as_deref(), Some("TBA2|TBA9"));
+    }
+    #[test]
+    fn same_number_no_change_and_empty_keeps() {
+        let p = build_plan(&[row(1, "TBA2")], &[line("TBA2")]);
+        assert_eq!(tracking_of(&p, 1), None);
+        let p = build_plan(&[row(1, "TBA2")], &[line("")]);
+        assert_eq!(tracking_of(&p, 1), None);
+    }
 }
