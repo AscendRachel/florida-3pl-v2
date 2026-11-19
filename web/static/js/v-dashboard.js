@@ -22,7 +22,10 @@ const LEGEND = [
   ["Purple", "#9900ff", "Return to Sender. The package was unsuccessfully delivered and is being returned to the sender (3PL/warehouse)."],
 ];
 
-const TONE = { estimated: "info", warehouse: "violet", hold: "warn", customer: "ok", usps: "ok", uspsnot: "warn", sourcetf: "warn", amazon: "info", arrived: "ok" };
+// every card of the first row has its own colour
+const TONE = { estimated: "info", warehouse: "violet", hold: "warn", customer: "ok", usps: "teal", uspsnot: "orange", sourcetf: "crit", amazon: "pink" };
+// and every counter of the second row has its own colour too, none repeats a colour of the first row
+const CTONE = { rts: "lime", rta: "cyan", repo: "indigo", holdc: "brown", storec: "magenta", allc: "slate", stockc: "maroon", arrived: "sand" };
 
 export async function mount(el, params, ctx) {
   let day = params.get("date") || "", data = null, timer = null;
@@ -56,7 +59,7 @@ export async function mount(el, params, ctx) {
           ${ctx.isAdmin() ? '<button class="btn" id="ops">Operators</button>' : ""}</div></div>
       <div class="dash-cards">${data.cards.map((c) => `<${c.href ? `a href="${esc(c.href)}" title="Show these orders in All Orders" style="text-decoration:none;color:inherit"` : "div"} class="scard ${TONE[c.key] || ""} dash-card"><div class="dash-n">${fmt(c.n)}</div>
         <div class="dash-l">${esc(c.label)}${c.note ? `<div class="muted">${esc(c.note)}</div>` : ""}</div></${c.href ? "a" : "div"}>`).join("")}</div>
-      <div class="dash-cards dash-counters">${data.counters.map((c) => `<${c.href ? `a href="${esc(c.href)}" title="Show these orders in All Orders" style="text-decoration:none;color:inherit"` : `div title="${esc(c.note)}"`} class="scard neutral dash-card"><div class="dash-n">${fmt(c.n)}</div>
+      <div class="dash-cards dash-counters">${data.counters.map((c) => `<${c.href ? `a href="${esc(c.href)}" title="Show these orders in All Orders" style="text-decoration:none;color:inherit"` : `div title="${esc(c.note)}"`} class="scard ${CTONE[c.key] || "neutral"} dash-card"><div class="dash-n">${fmt(c.n)}</div>
         <div class="dash-l">${esc(c.label)}<div class="muted">${esc(c.note)}</div></div></${c.href ? "a" : "div"}>`).join("")}</div>
       <div class="dash-legend-head"><h3>Rows color legend</h3><span class="muted">Always refer to the row color in All Orders to understand the status of an order and take the appropriate action.</span></div>
       <div class="dash-cards dash-legend">${LEGEND.map(([name, hex, text], i) => `<a class="legend-card" href="#orders?color=${encodeURIComponent(hex)}" title="Show the ${esc(name)} orders in All Orders" style="--lg:${hex};--lg-fg:${textOn(hex)}"><div class="legend-title"><span class="legend-n">${i + 1}</span>${esc(name)}<span class="legend-count" title="Rows with this color right now">${fmt((data.colors || {})[hex] || 0)}</span></div>

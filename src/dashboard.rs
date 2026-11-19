@@ -164,8 +164,6 @@ async fn compute(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Has
         { "key": "sourcetf", "label": "Source Time Frame", "note": "4 or more Source Delivery Days, right now. Not counted: delivered, refunded, for refund, cancelled, unfulfilled", "href": "#orders?show=sourcedays",
           "n": count(&s, "SELECT COUNT(*) FROM orders WHERE source_delivery_days >= 4 AND LOWER(TRIM(IFNULL(source_order_status, ''))) NOT IN ('for refund', 'refunded', 'cancelled', 'unfulfilled', 'delivered')", &[]).await? },
         { "key": "amazon", "label": "Total Shipped to Amazon", "n": count(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE {}", on("SHIPPED TO  AMAZON DATE")), &[&day]).await? },
-        // counted by the Delivery Date (the estimated delivery date from the Amazon file), for the rows that are Delivered
-        { "key": "arrived", "label": "Packages Arrived Today", "n": count(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE {} = 'Delivered' AND {}", c("Source Order Status"), on("Delivery Date")), &[&day]).await? },
     ]);
 
     // the sheet's counter columns (RTS / RTA / Item on Hold / Store Returns / All Orders / Stock Counter): live totals, not by day
@@ -179,6 +177,8 @@ async fn compute(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Has
         { "key": "holdc", "label": "Item on Hold Counter", "note": "Items ticked on hold", "n": count(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE {} = 'TRUE'", c("ITEM ON HOLD")), &[]).await? },
         { "key": "storec", "label": "Store Returns Counter", "note": "Store Returns, not yet shipped to Amazon", "n": count(&s, &status("Store Returns"), &[]).await? },
         { "key": "allc", "label": "All Orders Counter", "note": "Orders not yet shipped to the customer", "n": count(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE {has_order} AND {} != 'TRUE'", c("Shipped to Customer")), &[]).await? },
+        // counted by the Delivery Date (the estimated delivery date from the Amazon file), for the rows that are Delivered; by day
+        { "key": "arrived", "label": "Packages Arrived Today", "note": "Delivered, by the Delivery Date of the day", "n": count(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE {} = 'Delivered' AND {}", c("Source Order Status"), on("Delivery Date")), &[&day]).await? },
         { "key": "stockc", "label": "Stock Counter", "note": "Orders taken from stock", "n": count(&s, &format!("SELECT COUNT(*) FROM orders_text WHERE {has_order} AND {} = 'TRUE'", c("Stock")), &[]).await? },
     ]);
 
