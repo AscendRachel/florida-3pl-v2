@@ -90,7 +90,7 @@ export async function mount(el, params, ctx) {
 
   const sc = $("#sc"), body = $("#gbody"), rowsEl = $("#rows"), inner = $("#inner");
 
-  const query = (extra = {}) => ({ q: st.q, card: st.card, sort: st.sort, dir: st.dir, flt: st.cf, ...(st.etaday ? { etaday: st.etaday } : {}), ...(st.uspsday ? { uspsday: st.uspsday } : {}), ...(st.repo ? { repo: "1" } : {}), ...(st.keep.size ? { keep: [...st.keep] } : {}), ...extra });
+  const query = (extra = {}) => ({ q: st.q, card: st.card, sort: st.sort, dir: st.dir, flt: st.cf, ...(st.etaday ? { etaday: st.etaday } : {}), ...(st.uspsday ? { uspsday: st.uspsday } : {}), ...(st.uspsday && st.uspsnot ? { uspsnot: "1" } : {}), ...(st.repo ? { repo: "1" } : {}), ...(st.keep.size ? { keep: [...st.keep] } : {}), ...extra });
   const rowAt = (i) => pages.get(Math.floor(i / PAGE))?.[i % PAGE];
   const countText = () => `${fmt(st.total)} order${st.total === 1 ? "" : "s"}${nFilters() ? ` · ${nFilters()} column filter${nFilters() === 1 ? "" : "s"}` : ""}`;
   // (a page that answers after the person has already left All Orders finds nothing to write to: that is not an error)
@@ -1640,7 +1640,7 @@ export async function mount(el, params, ctx) {
     const card = e.target.closest("[data-card]");
     if (card) { st.card = card.dataset.card === "all" ? "" : card.dataset.card; st.keep.clear(); renderCards(); return reset(); }
     if (e.target.closest("#clear")) {
-      st.q = ""; st.card = ""; st.cf = {}; st.etaday = ""; st.uspsday = ""; st.repo = false; st.keep.clear(); $("#q").value = ""; showEtaNote();
+      st.q = ""; st.card = ""; st.cf = {}; st.etaday = ""; st.uspsday = ""; st.uspsnot = false; st.repo = false; st.keep.clear(); $("#q").value = ""; showEtaNote();
       renderCards(); drawHead();
       return reset();
     }
@@ -1776,11 +1776,14 @@ export async function mount(el, params, ctx) {
     n.textContent = st.repo
       ? "Showing only the orders the RE-P.O Counter counts: RE-P.O ticked, Tracking Status Preshipment, not refunded, cancelled, for refund or unfulfilled. Clear filters shows every order again."
       : st.uspsday
-      ? `Showing only the packages picked up by USPS on ${st.uspsday}: shipped to the customer from 2:00 PM the day before until 1:59 PM. Clear filters shows every order again.`
+      ? st.uspsnot
+      ? `Showing only the packages NOT picked up by USPS on ${st.uspsday}: shipped to the customer from 2:00 PM the day before until 1:59 PM, and the Tracking Status is still Preshipment. Clear filters shows every order again.`
+      : `Showing only the packages picked up by USPS on ${st.uspsday}: shipped to the customer from 2:00 PM the day before until 1:59 PM. Clear filters shows every order again.`
       : `Showing only the orders whose estimated Delivery Date was moved on ${st.etaday}. Clear filters shows every order again.`;
   };
   st.etaday = /^\d{4}-\d\d-\d\d$/.test(params.get("etaday") || "") ? params.get("etaday") : "";
   st.uspsday = /^\d{4}-\d\d-\d\d$/.test(params.get("uspsday") || "") ? params.get("uspsday") : "";
+  st.uspsnot = !!st.uspsday && params.get("uspsnot") === "1";
   if (st.etaday || st.uspsday) { st.q = ""; st.card = ""; st.sort = ""; st.dir = "asc"; $("#q").value = ""; st.cf = {}; }
   showEtaNote();
   // coming from a notification: search for that order and pick out the row (and the note's cell)

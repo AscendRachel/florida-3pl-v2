@@ -156,6 +156,9 @@ async fn compute(_u: CurrentUser, State(s): State<AppState>, Query(q): Query<Has
         // the USPS truck comes at 2 PM: what was shipped to the customer since the last pick-up (2:00 PM the day before until 1:59 PM that day)
         { "key": "usps", "label": "Packages Picked Up by USPS", "note": "shipped from 2 PM the day before to 1:59 PM", "href": format!("#orders?uspsday={day}"), "n": count(&s, &format!(
             "SELECT COUNT(*) FROM orders_text WHERE {col} >= ? AND {col} < ?", col = c("SHIPPED TO  CUSTOMER DATE")), &[&usps_from, &usps_to]).await? },
+        // the same pick-up window, only the packages whose Tracking Status is still Preshipment (not scanned by USPS yet)
+        { "key": "uspsnot", "label": "Packages Not Picked Up by USPS", "note": "same window, Tracking Status still Preshipment", "href": format!("#orders?uspsday={day}&uspsnot=1"), "n": count(&s, &format!(
+            "SELECT COUNT(*) FROM orders_text WHERE {col} >= ? AND {col} < ? AND {ts} = 'Preshipment'", col = c("SHIPPED TO  CUSTOMER DATE"), ts = c("Tracking Status")), &[&usps_from, &usps_to]).await? },
         // orders that take long from the Source Order Date to the Delivery Date: 4 or more days (0 to 3 days are not counted), leaving out the
         // orders that are delivered, refunded, for refund, cancelled or unfulfilled; right now, not by day
         { "key": "sourcetf", "label": "Source Time Frame", "note": "4 or more Source Delivery Days, right now. Not counted: delivered, refunded, for refund, cancelled, unfulfilled", "href": "#orders?show=sourcedays",

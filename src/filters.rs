@@ -196,6 +196,10 @@ pub fn build_where(schema: &Schema, p: &Value, skip: Option<usize>) -> AppResult
         where_.push(format!("{col} >= ? AND {col} < ?"));
         args.push(Arg::S(format!("{} 14:00", (day - Duration::days(1)).format("%Y-%m-%d"))));
         args.push(Arg::S(format!("{} 14:00", day.format("%Y-%m-%d"))));
+        // the card "Packages Not Picked Up by USPS": the same window, only the rows whose Tracking Status is still Preshipment
+        if st(p, "uspsnot") == "1" {
+            where_.push(format!("{} = 'Preshipment'", schema.c("Tracking Status")));
+        }
     }
     // the Dashboard card "RE-P.O Counter": the very rows it counts (the same rule as in dashboard.rs)
     if st(p, "repo") == "1" {
