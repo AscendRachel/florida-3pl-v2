@@ -78,6 +78,30 @@ fn tokens(k: &str) -> Vec<String> {
     out
 }
 
+/// What the scanner read, as the tracking number printed on the label. A USPS label (Parcel Select, delivered by the post office) carries a
+/// longer barcode: the code 420 and the ZIP code (5 or 9 digits) in front of the real tracking number, which begins with 9 (for example
+/// 9361 2897 4107 0517 7751 28 is read as 420 32811 9361289741070517775128). Those leading digits are taken off. Amazon (TBA...) and other
+/// numbers are left as they are.
+pub fn clean_code(raw: &str) -> String {
+    let code = raw.trim().to_uppercase();
+    if code.len() < 28 || !code.bytes().all(|c| c.is_ascii_digit()) || !code.starts_with("420") {
+        return code;
+    }
+    // the tracking number that is left after "420" + ZIP: 22 digits is the usual length, 20 to 34 are accepted
+    let after_zip5 = &code[8..];
+    let after_zip9 = &code[12..];
+    let ok = |t: &str| t.starts_with('9') && (20..=34).contains(&t.len());
+    if after_zip9.len() == 22 && ok(after_zip9) {
+        after_zip9.to_string()
+    } else if ok(after_zip5) {
+        after_zip5.to_string()
+    } else if ok(after_zip9) {
+        after_zip9.to_string()
+    } else {
+        code
+    }
+}
+
 fn to_int(v: &str, default: i64) -> i64 {
     v.replace(',', "").trim().parse::<f64>().map_or(default, |f| f as i64)
 }
@@ -406,7 +430,7 @@ async fn scan_action(u: crate::auth::User, s: AppState, action: String, b: Value
     let sch = s.schema();
     let who: String = u.name.chars().take(60).collect();
     let dry = b.get("dry").and_then(Value::as_bool).unwrap_or(false);
-    let code = b.get("code").and_then(Value::as_str).unwrap_or("").to_string();
+    let code = clean_code(b.get("code").and_then(Value::as_str).unwrap_or(""));
     let rn = ival(&b, "rn", 0) as u64;
     let mut tx = s.db.begin().await?;
     let out = match action.as_str() {
@@ -544,4 +568,22 @@ async fn drive_pdf(key: u64, link: &str, no_link: &str) -> AppResult<Vec<u8>> {
 
 fn pdf(data: Vec<u8>) -> Response {
     ([(CONTENT_TYPE, "application/pdf".to_string()), (CACHE_CONTROL, "no-store".to_string())], data).into_response()
+}
+
+#[cfg(test)]
+mod clean_code_tests {
+    use super::clean_code;
+
+    #[test]
+    fn usps_label_with_420_and_zip() {
+        assert_eq!(clean_code("4203281193612897410705177 75128".replace(' ', "").as_str()), "9361289741070517775128");
+        assert_eq!(clean_code("420328116475 9361289741070517775128".replace(' ', "").as_str()), "9361289741070517775128");
+    }
+    #[test]
+    fn other_numbers_are_left_alone() {
+        assert_eq!(clean_code(" tba336586467199 "), "TBA336586467199");
+        assert_eq!(clean_code("9361289741070517775128"), "9361289741070517775128");
+        assert_eq!(clean_code("420328119"), "420328119");
+        assert_eq!(clean_code("543413059330"), "543413059330");
+    }
 }
