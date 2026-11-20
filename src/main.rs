@@ -29,6 +29,7 @@ mod schema;
 mod security;
 mod sheet_import;
 mod settings;
+mod stock_use;
 mod team_api;
 mod timeframe;
 mod xlsx;

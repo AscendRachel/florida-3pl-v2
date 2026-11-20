@@ -74,6 +74,16 @@ export async function mount(el, params, ctx) {
     } while (rows.length < total);
     kohlsRows = (await api("/api/kohls")).rows;
     items = [...rows.map((r) => ({ kind: "order", r })), ...kohlsRows.map((r) => ({ kind: "kohls", r }))];
+    // what was used from each item in Use Stock: the quantity left is its QTY minus that, and an item with none left is not stock any more
+    let used = {};
+    try { used = (await api("/api/stockuse/summary")).used || {}; } catch { /* the cards still show, without the used counts */ }
+    for (const it of items) {
+      const n = parseFloat(String(it.kind === "order" ? val(it.r, "QTY") : it.r.qty ?? "").replace(/,/g, ""));
+      it.total = n > 0 ? Math.round(n) : 1; // a blank QTY counts as 1
+      it.used = used[`${it.kind === "order" ? "order" : "kohls"}:${it.kind === "order" ? it.r[0] : it.r.id}`] || 0;
+      it.left = Math.max(it.total - it.used, 0);
+    }
+    items = items.filter((it) => it.left > 0);
     items.sort((a, b) => numberOf(b) - numberOf(a)); // the highest stock number first
   }
 
@@ -155,6 +165,7 @@ export async function mount(el, params, ctx) {
         ${field("Product Name:", `<small>${esc(v("Product Name"))}</small>`)}
         ${field("Brand:", `<small>${esc(v("Brand"))}</small>`)}
         ${field("Quantity of this Product:", esc(v("QTY")))}
+        ${it.used ? field("In stock now:", `<b>${it.left}</b> <span class="muted">(${it.used} used)</span>`) : ""}
         <hr>
         ${field("Amazon Order Number:", `<small>${esc(v("Source Order Number"))}</small>`)}
         ${field("Amazon Tracking Number:", `<small>${esc(v("Source Tracking Number").replace(/\s*\|\s*/g, " | "))}</small>`)}
@@ -165,6 +176,8 @@ export async function mount(el, params, ctx) {
         ${field("Shipment Status:", `<small>${esc(v("Tracking Status"))}</small>`)}
         ${field("Notes:", `<small>${esc(v("Notes"))}</small>`)}
         ${BOOLS.map((k) => field(label(k) + ":", `<span class="flag ${v(k) === "TRUE" ? "yes" : ""}">${flag(v(k))}</span>`)).join("")}
+        ${byKey["Store Refunded"] ? field(label("Store Refunded") + ":", `<span class="flag ${v("Store Refunded") === "TRUE" ? "yes" : ""}">${flag(v("Store Refunded"))}</span>`) : ""}
+        ${byKey["Buying Cost"] ? field(label("Buying Cost") + ":", esc(v("Buying Cost"))) : ""}
       </div>
       <div class="oc-actions">${canPrint ? `<button class="btn primary" data-print="${key}">Print label</button>` : ""}<button class="btn${canPrint ? "" : " primary"}" data-edit="${key}">Edit</button></div>
     </article>`;
@@ -181,6 +194,7 @@ export async function mount(el, params, ctx) {
         ${field("Product Name:", `<small>${esc(r.product)}</small>`)}
         ${field("Order Number:", `<small>${esc(r.order_number)}</small>`)}
         ${field("Quantity of this Product:", esc(r.qty))}
+        ${it.used ? field("In stock now:", `<b>${it.left}</b> <span class="muted">(${it.used} used)</span>`) : ""}
         <hr>
         ${field("Good Condition:", `<span class="flag ${r.good === "TRUE" ? "yes" : ""}">${flag(r.good)}</span>`)}
         ${field("Shipped to Customer:", `<span class="flag ${r.used === "TRUE" ? "yes" : ""}">${flag(r.used)}</span>`)}
@@ -209,13 +223,24 @@ export async function mount(el, params, ctx) {
       title: "Update record",
       body: `<label class="field"><span>Add Notes:</span><textarea name="Notes" rows="2">${esc(cur("Notes"))}</textarea></label>
         <label class="field"><span>${esc(label("STOCK NO."))} *</span><input name="stock" value="${esc(cur("STOCK NO."))}" required autocomplete="off"></label>
-        <label class="check"><input type="checkbox" name="ship" ${cur("Shipped to Customer") === "TRUE" ? "checked" : ""}> ${esc(label("Shipped to Customer"))}</label>`,
+        <label class="check"><input type="checkbox" name="ship" ${cur("Shipped to Customer") === "TRUE" ? "checked" : ""}> ${esc(label("Shipped to Customer"))}</label>
+        ${byKey["Store Refunded"] ? `<label class="check"><input type="checkbox" name="refunded" ${cur("Store Refunded") === "TRUE" ? "checked" : ""}> ${esc(label("Store Refunded"))}</label>` : ""}
+        ${byKey["Buying Cost"] ? `<label class="field"><span>${esc(label("Buying Cost"))}</span><input name="cost" value="${esc(cur("Buying Cost"))}" inputmode="decimal" autocomplete="off"></label>` : ""}`,
       actions: [["Cancel", "close"], ["Update", "ok", "primary"]],
     });
     if (res.value !== "ok") return;
     const f = new FormData(res.el.querySelector("form"));
     const edits = [];
     const notes = String(f.get("Notes") ?? ""), stock = String(f.get("stock") ?? "").trim(), ship = f.get("ship") ? "TRUE" : "FALSE";
+    // the same cells as in All Orders: a change here is a change there
+    if (byKey["Store Refunded"]) {
+      const on = f.get("refunded") ? "TRUE" : "FALSE";
+      if (on !== (cur("Store Refunded") === "TRUE" ? "TRUE" : "FALSE")) edits.push({ rn: r[0], col: idx("Store Refunded"), value: on });
+    }
+    if (byKey["Buying Cost"]) {
+      const cost = String(f.get("cost") ?? "").trim();
+      if (cost !== cur("Buying Cost")) edits.push({ rn: r[0], col: idx("Buying Cost"), value: cost });
+    }
     if (notes !== cur("Notes")) edits.push({ rn: r[0], col: idx("Notes"), value: notes });
     if (stock !== cur("STOCK NO.")) edits.push({ rn: r[0], col: idx("STOCK NO."), value: stock });
     if (ship !== (cur("Shipped to Customer") === "TRUE" ? "TRUE" : "FALSE")) edits.push({ rn: r[0], col: idx("Shipped to Customer"), value: ship });

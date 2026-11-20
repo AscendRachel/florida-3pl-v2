@@ -22,11 +22,12 @@ pub const COOKIE_NAME: &str = "f3pl_session";
 pub const SESSION_DAYS: i64 = 14;
 pub const ROLES: [&str; 3] = ["admin", "warehouse", "member"];
 /// The tabs an admin can hand out to a member.
-pub const TABS: [&str; 13] = ["dashboard", "scan", "cards", "orders", "returns", "materials", "checklist", "timeframe", "worklog", "amazon", "import", "team", "admin"];
+pub const TABS: [&str; 14] = ["dashboard", "scan", "cards", "stockuse", "orders", "returns", "materials", "checklist", "timeframe", "worklog", "amazon", "import", "team", "admin"];
 /// The tabs that used to be for admins only: a member sees one only when it is ticked for them (an old "every tab" member does not get them).
 pub const ADMIN_TABS: [&str; 5] = ["worklog", "amazon", "import", "team", "admin"];
 /// Data that belongs to one tab (any of the tabs listed may read it). Shared data (orders, meta ...) stays open to every signed-in person.
-const API_TABS: [(&str, &[&str]); 6] = [
+const API_TABS: [(&str, &[&str]); 7] = [
+    ("/api/stockuse", &["stockuse", "cards"]),
     ("/api/checklist", &["checklist"]),
     ("/api/timeframe", &["timeframe"]),
     ("/api/dashboard", &["dashboard"]),

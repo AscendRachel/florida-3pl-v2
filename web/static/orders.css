@@ -515,3 +515,8 @@ main:has(.kwrap) { max-width: 2200px; padding-left: clamp(16px, 2.5vw, 48px); pa
 .chk-table .chk-x { min-width: 230px; padding: 3px; vertical-align: top; }
 .chk-table .chk-x textarea { font-weight: 500; }
 .chk-table .chk-blank { background: rgba(127, 127, 127, .15); }
+
+/* dragging a column heading to move the column */
+.hrow .hc:not(.rn):not(.pin) { cursor: grab; }
+body.colmoving, body.colmoving * { cursor: grabbing !important; user-select: none; }
+.colmark { position: fixed; width: 3px; margin-left: -1px; background: var(--brand); z-index: 200; pointer-events: none; border-radius: 2px; }

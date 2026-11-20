@@ -43,6 +43,14 @@ export async function mount(el, params, ctx) {
   // Gift Note (Label Number + Customer Name) used to start hidden: show it once for everyone who had it hidden; their own choice after that is kept
   if (store.get("gt_gift_shown", "") !== "1") { hidden.delete("Gift Note"); store.set("gt_gift_shown", "1"); store.set("gt_orders_hidden", JSON.stringify([...hidden])); }
   const widths = readJson("gt_orders_widths", {});
+  // the order this person dragged the columns into (names, saved on this browser); a column that is not in it (a new one) goes to the end
+  let colOrder = readJson("gt_orders_order", []);
+  const ordered = () => {
+    const by = new Map(cols.map((c) => [c.name, c]));
+    const first = colOrder.filter((n) => by.has(n)).map((n) => by.get(n));
+    const seen = new Set(first.map((c) => c.name));
+    return [...first, ...cols.filter((c) => !seen.has(c.name))];
+  };
   const st = { q: "", card: "", cf: {}, sort: "", dir: "asc", total: 0, act: null, anc: null, edit: null, rowSel: false, keep: new Set(), find: "", hits: [], hi: -1 };
   // In a filtered view (a Dashboard card, a search, a column filter ...) a row this person changed stays on screen even when the change made it
   // stop matching, with the colour of its new status. It goes away when they change the filter or leave All Orders.
@@ -151,7 +159,7 @@ export async function mount(el, params, ctx) {
   const refreshCardsSoon = debounce(refreshCards, 800);
 
   function drawHead() {
-    list = cols.filter((c) => !hidden.has(c.name));
+    list = ordered().filter((c) => !hidden.has(c.name));
     let x = RN_W;
     lefts = list.map((c) => { const l = x; x += width(c); return l; });
     geo = { total: x };
@@ -1646,10 +1654,12 @@ export async function mount(el, params, ctx) {
     }
     if (e.target.closest("#colsBtn")) {
       // the dialog's own buttons: tick everything, untick everything, or go back to the default set
+      let resetOrder = false;
       const bulk = (ev) => {
         const b = ev.target.closest("[data-bulk]");
         if (!b) return;
         ev.preventDefault();
+        if (b.dataset.bulk === "default") resetOrder = true; // "Reset to default" also puts the columns back in their original order
         for (const box of b.closest("dialog").querySelectorAll(".colgrid input[type=checkbox]")) {
           box.checked = b.dataset.bulk === "all" ? true : b.dataset.bulk === "none" ? false : !DEFAULT_HIDDEN.includes(box.name);
         }
@@ -1667,10 +1677,55 @@ export async function mount(el, params, ctx) {
       hidden.clear();
       r.el.querySelectorAll("input[type=checkbox]").forEach((i) => { if (!i.checked) hidden.add(i.name); });
       store.set("gt_orders_hidden", JSON.stringify([...hidden]));
+      if (resetOrder) { colOrder = []; store.set("gt_orders_order", "[]"); }
       cancelEdit(); st.act = st.anc = null;
       drawHead(); paint();
     }
   };
+  // drag a column heading left or right to move the column (the first column stays where it is); the new order is kept on this browser
+  $("#hrow").addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || e.target.closest("[data-fb], [data-rz]")) return;
+    const cells = [...$("#hrow").children].slice(1), from = cells.indexOf(e.target.closest(".hc:not(.rn)"));
+    if (from < pinCount) return; // the frozen column(s) do not move
+    const x0 = e.clientX; let x = x0, on = false, to = from, mark = null, timer = null;
+    const place = () => {
+      const rects = cells.map((c) => c.getBoundingClientRect());
+      let j = rects.findIndex((r) => x >= r.left && x < r.right);
+      if (j < 0) j = x < rects[0].left ? 0 : cells.length - 1;
+      to = Math.max(pinCount, j);
+      const r = rects[to], at = to > from ? r.right : r.left;
+      mark.style.left = Math.round(at) + "px"; mark.style.top = Math.round(r.top) + "px"; mark.style.height = Math.round(sc.getBoundingClientRect().bottom - r.top) + "px";
+    };
+    const mv = (ev) => {
+      x = ev.clientX;
+      if (!on) {
+        if (Math.abs(x - x0) < 6) return;
+        on = true; cancelEdit(); dragging = true;
+        document.body.classList.add("colmoving");
+        mark = document.createElement("div"); mark.className = "colmark"; document.body.append(mark);
+        timer = setInterval(() => { // near an edge of the grid: scroll sideways while the mouse waits there
+          const b = sc.getBoundingClientRect();
+          const pinned = b.left + lefts[pinCount - 1] + width(list[pinCount - 1]); // the right edge of the frozen columns
+          if (x > b.right - 50) sc.scrollLeft += 24; else if (x < pinned + 50) sc.scrollLeft -= 24;
+          place();
+        }, 30);
+      }
+      place();
+    };
+    const up = () => {
+      removeEventListener("pointermove", mv); removeEventListener("pointerup", up); removeEventListener("pointercancel", up);
+      clearInterval(timer); mark?.remove(); document.body.classList.remove("colmoving");
+      if (!on) return;
+      setTimeout(() => { dragging = false; }, 0);
+      if (to === from) return;
+      const all = ordered().map((c) => c.name), moved = list[from].name, target = list[to].name;
+      all.splice(all.indexOf(moved), 1);
+      all.splice(all.indexOf(target) + (to > from ? 1 : 0), 0, moved); // dropped further right: after that column, further left: before it
+      colOrder = all; store.set("gt_orders_order", JSON.stringify(all));
+      st.act = st.anc = null; drawHead(); paint();
+    };
+    addEventListener("pointermove", mv); addEventListener("pointerup", up); addEventListener("pointercancel", up);
+  });
   const applySearch = debounce(() => { st.q = $("#q").value; st.keep.clear(); reset(); });
   el.oninput = (e) => { if (e.target.id === "q") applySearch(); };
   el.addEventListener("pointerdown", (e) => {
