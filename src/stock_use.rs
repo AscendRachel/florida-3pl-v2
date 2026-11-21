@@ -1,8 +1,8 @@
-//! Use Stock: send a product to a customer order from the stock that was set aside (returned items kept with a STOCK NO.).
+//! Use Stock: send a product to a customer from the stock that was set aside (returned items kept with a STOCK NO.).
 //!
-//! A stock item is an order of All Orders with Stock ticked, or a row of Kohl's Returns. Its quantity is its QTY. Using stock never changes
-//! that QTY: each use is one row of `stock_used`, and what is left is QTY minus the rows that are not voided. At 0 the item leaves the
-//! Stocks cards; the rows stay in the "Used" list (an undo marks a row voided, it is never deleted).
+//! A stock item is an order of All Orders with Stock ticked, or a row of Kohl's Returns. Its quantity is its QTY. Using stock takes the
+//! quantity straight off that QTY (so the Stocks cards and All Orders show what is left) and writes one row of `stock_used` for the Used
+//! list. At 0 the item leaves the Stocks cards. Undoing a use adds the quantity back and marks the row voided (rows are never deleted).
 
 use std::collections::HashMap;
 
@@ -11,12 +11,15 @@ use axum::response::Json;
 use serde_json::{json, Value};
 use sqlx::{MySqlConnection, Row};
 
-use crate::auth::{need_tab, CurrentUser};
+use crate::auth::{need_tab, CurrentUser, User};
 use crate::error::{AppError, AppResult};
 use crate::orders_write::now_minute;
 use crate::AppState;
 
 const TAB: &str = "stockuse";
+
+/// One person at a time changes a stock quantity (a single server runs the app), so two people can never take the same unit.
+static GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn clip(s: &str, n: usize) -> String {
     s.trim().chars().take(n).collect()
@@ -26,25 +29,16 @@ fn text(r: &sqlx::mysql::MySqlRow, i: usize) -> String {
     r.try_get_unchecked::<String, _>(i).unwrap_or_default()
 }
 
-/// A stock item's quantity: its QTY, and 1 when that is blank or not a number.
+/// A stock item's quantity: its QTY (0 when it was all used), and 1 when the QTY is blank or not a number.
 fn qty_of(v: &str) -> i64 {
-    v.trim().replace(',', "").parse::<f64>().map(|f| f.round() as i64).ok().filter(|n| *n > 0).unwrap_or(1)
+    v.trim().replace(',', "").parse::<f64>().map(|f| (f.round() as i64).max(0)).unwrap_or(1)
 }
 
-async fn used_of(db: &mut MySqlConnection, source: &str, id: i64) -> AppResult<i64> {
-    Ok(sqlx::query_scalar::<_, i64>("SELECT CAST(COALESCE(SUM(qty), 0) AS SIGNED) FROM stock_used WHERE source = ? AND ref = ? AND voided = 0")
-        .bind(source)
-        .bind(id)
-        .fetch_one(db)
-        .await?)
-}
-
-/// (source, id, stock no, sku, product, store, image, qty text) of one stock item -> what the pages show.
+/// What the pages show of one stock item.
 #[allow(clippy::too_many_arguments)]
-async fn shape(db: &mut MySqlConnection, source: &str, id: i64, stock_no: String, sku: String, product: String, store: String, image: String, qty: &str) -> AppResult<Value> {
-    let (total, used) = (qty_of(qty), used_of(db, source, id).await?);
-    Ok(json!({ "source": source, "ref": id, "stock_no": stock_no, "sku": sku, "product": product, "store": store, "image": image,
-               "qty": total, "used": used, "remaining": (total - used).max(0) }))
+fn shape(source: &str, id: i64, stock_no: String, sku: String, product: String, store: String, image: String, qty: &str) -> Value {
+    let n = qty_of(qty);
+    json!({ "source": source, "ref": id, "stock_no": stock_no, "sku": sku, "product": product, "store": store, "image": image, "qty": n, "remaining": n })
 }
 
 /// One stock item, or None when it is gone or no longer stock.
@@ -54,8 +48,7 @@ async fn item(db: &mut MySqlConnection, s: &AppState, source: &str, id: i64) -> 
             .bind(id)
             .fetch_optional(&mut *db)
             .await?;
-        let Some(r) = row else { return Ok(None) };
-        return Ok(Some(shape(db, "kohls", id, text(&r, 1), text(&r, 2), text(&r, 3), text(&r, 4), text(&r, 5), &text(&r, 6)).await?));
+        return Ok(row.map(|r| shape("kohls", id, text(&r, 1), text(&r, 2), text(&r, 3), text(&r, 4), text(&r, 5), &text(&r, 6))));
     }
     let sch = s.schema();
     let sql = format!(
@@ -66,7 +59,28 @@ async fn item(db: &mut MySqlConnection, s: &AppState, source: &str, id: i64) -> 
     if text(&r, 7) != "TRUE" || text(&r, 1).trim().is_empty() {
         return Ok(None);
     }
-    Ok(Some(shape(db, "order", id, text(&r, 1), text(&r, 2), text(&r, 3), text(&r, 4), text(&r, 5), &text(&r, 6)).await?))
+    Ok(Some(shape("order", id, text(&r, 1), text(&r, 2), text(&r, 3), text(&r, 4), text(&r, 5), &text(&r, 6))))
+}
+
+/// The quantity now in the QTY cell of a stock item, whether or not it is still stock (None when the row is gone).
+async fn current_qty(db: &mut MySqlConnection, s: &AppState, source: &str, id: i64) -> AppResult<Option<i64>> {
+    let sql = if source == "kohls" { "SELECT CAST(IFNULL(qty,'') AS CHAR) FROM kohls WHERE id = ?".to_string() } else { format!("SELECT {} FROM orders_text WHERE rn = ?", s.schema().c("QTY")) };
+    Ok(sqlx::query(&sql).bind(id).fetch_optional(&mut *db).await?.map(|r| qty_of(&text(&r, 0))))
+}
+
+/// Put a new quantity in the QTY of a stock item. For an order this is the same save as typing in All Orders (protections, "Updated by").
+async fn write_qty(s: &AppState, u: &User, source: &str, id: i64, qty: i64) -> AppResult<()> {
+    if source == "kohls" {
+        sqlx::query("UPDATE kohls SET qty = ?, updated_by = ?, updated_at = ? WHERE id = ?").bind(qty).bind(&u.name).bind(now_minute()).bind(id).execute(&s.db).await?;
+        s.bump();
+        return Ok(());
+    }
+    let Some(col) = s.schema().at("QTY") else { return Err(AppError::bad("All Orders has no QTY column.")) };
+    let Json(out) = crate::orders_write::cells(CurrentUser(u.clone()), State(s.clone()), Json(json!({ "edits": [{ "rn": id, "col": col, "value": qty.to_string() }] }))).await?;
+    if out["skipped"].as_i64().unwrap_or(0) > 0 {
+        return Err(AppError::bad(out["reason"].as_str().unwrap_or("The QTY cell is protected.").to_string()));
+    }
+    Ok(())
 }
 
 /// The stock items with this STOCK NO. (and how much of each is left).
@@ -98,25 +112,7 @@ pub async fn find(CurrentUser(u): CurrentUser, State(s): State<AppState>, Query(
     Ok(Json(json!({ "items": items })))
 }
 
-/// The customer order a person typed (a Store Order No. or a Label Number), so they can see it is the right one.
-pub async fn order(CurrentUser(u): CurrentUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Json<Value>> {
-    need_tab(&u, TAB)?;
-    let no = clip(q.get("ref").map(String::as_str).unwrap_or(""), 200);
-    if no.is_empty() {
-        return Ok(Json(json!({ "orders": [] })));
-    }
-    let sch = s.schema();
-    let (so, lb) = (sch.c("Store Order No."), sch.c("Label Number"));
-    let sql = format!(
-        "SELECT {lb}, {so}, {}, {}, {}, {} FROM orders_text WHERE LOWER(TRIM({so})) = LOWER(?) OR LOWER(TRIM({lb})) = LOWER(?) ORDER BY rn DESC LIMIT 5",
-        sch.c("Customer Name"), sch.c("Product Name"), sch.c("SKU"), sch.c("Store")
-    );
-    let rows = sqlx::query(&sql).bind(&no).bind(&no).fetch_all(&s.db).await?;
-    let orders: Vec<Value> = rows.iter().map(|r| json!({ "label": text(r, 0), "store_order": text(r, 1), "customer": text(r, 2), "product": text(r, 3), "sku": text(r, 4), "store": text(r, 5) })).collect();
-    Ok(Json(json!({ "orders": orders })))
-}
-
-/// Take `qty` of a stock item for a customer order.
+/// Take `qty` of a stock item: it comes off the QTY.
 pub async fn use_stock(CurrentUser(u): CurrentUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
     need_tab(&u, TAB)?;
     let source = b.get("source").and_then(Value::as_str).unwrap_or("");
@@ -125,25 +121,20 @@ pub async fn use_stock(CurrentUser(u): CurrentUser, State(s): State<AppState>, J
     }
     let id = b.get("ref").and_then(Value::as_i64).unwrap_or(0);
     let qty = b.get("qty").and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|t| t.trim().parse().ok()))).unwrap_or(0);
-    let order_ref = clip(b.get("order_ref").and_then(Value::as_str).unwrap_or(""), 200);
     let note = clip(b.get("note").and_then(Value::as_str).unwrap_or(""), 500);
     if qty < 1 {
         return Err(AppError::bad("Enter how many to use (1 or more)."));
     }
-    if order_ref.is_empty() {
-        return Err(AppError::bad("Enter the customer order this stock goes to."));
-    }
 
-    let mut tx = s.db.begin().await?;
-    // two people using the same stock item at once wait for each other here, so the quantity can never go below 0
-    let lock = if source == "kohls" { "SELECT 1 FROM kohls WHERE id = ? FOR UPDATE" } else { "SELECT 1 FROM orders WHERE rn = ? FOR UPDATE" };
-    sqlx::query(lock).bind(id).fetch_optional(&mut *tx).await?;
-    let Some(it) = item(&mut tx, &s, source, id).await? else { return Err(AppError::bad("That item is no longer in stock.")) };
+    let _one_at_a_time = GATE.lock().await;
+    let mut db = s.db.acquire().await?;
+    let Some(it) = item(&mut db, &s, source, id).await? else { return Err(AppError::bad("That item is no longer in stock.")) };
     let left = it["remaining"].as_i64().unwrap_or(0);
     if qty > left {
         return Err(AppError::bad(if left == 0 { "There is none of this stock left.".to_string() } else { format!("Only {left} left in stock.") }));
     }
-    sqlx::query("INSERT INTO stock_used (at, operator, source, ref, stock_no, sku, product, qty, order_ref, note) VALUES (?,?,?,?,?,?,?,?,?,?)")
+    write_qty(&s, &u, source, id, left - qty).await?;
+    sqlx::query("INSERT INTO stock_used (at, operator, source, ref, stock_no, sku, product, qty, order_ref, note) VALUES (?,?,?,?,?,?,?,?,'',?)")
         .bind(now_minute())
         .bind(&u.name)
         .bind(source)
@@ -152,14 +143,11 @@ pub async fn use_stock(CurrentUser(u): CurrentUser, State(s): State<AppState>, J
         .bind(it["sku"].as_str().unwrap_or(""))
         .bind(it["product"].as_str().unwrap_or(""))
         .bind(qty)
-        .bind(&order_ref)
         .bind(&note)
-        .execute(&mut *tx)
+        .execute(&mut *db)
         .await?;
-    let after = item(&mut tx, &s, source, id).await?;
-    tx.commit().await?;
     s.bump();
-    Ok(Json(json!({ "item": after })))
+    Ok(Json(json!({ "item": item(&mut db, &s, source, id).await? })))
 }
 
 /// What has been used, newest first.
@@ -170,7 +158,7 @@ pub async fn used(CurrentUser(u): CurrentUser, State(s): State<AppState>, Query(
     let rows = sqlx::query(
         "SELECT CAST(id AS SIGNED), CAST(DATE_FORMAT(at, '%Y-%m-%d %H:%i') AS CHAR), CAST(operator AS CHAR), CAST(source AS CHAR), CAST(stock_no AS CHAR), CAST(sku AS CHAR), CAST(IFNULL(product,'') AS CHAR), \
          CAST(qty AS SIGNED), CAST(order_ref AS CHAR), CAST(IFNULL(note,'') AS CHAR) FROM stock_used WHERE voided = 0 \
-         AND (? = '' OR LOWER(CONCAT_WS(' ', stock_no, sku, product, order_ref, operator, note)) LIKE ?) ORDER BY id DESC LIMIT 500",
+         AND (? = '' OR LOWER(CONCAT_WS(' ', stock_no, sku, product, operator, note)) LIKE ?) ORDER BY id DESC LIMIT 500",
     )
     .bind(&word)
     .bind(&like)
@@ -188,25 +176,23 @@ pub async fn used(CurrentUser(u): CurrentUser, State(s): State<AppState>, Query(
     Ok(Json(json!({ "rows": rows, "total_qty": total })))
 }
 
-/// Put a use back (a mistake): the quantity returns to the stock item and the row leaves the Used list.
+/// Put a use back (a mistake): the quantity goes back on the stock item's QTY and the row leaves the Used list.
 pub async fn undo(CurrentUser(u): CurrentUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
     need_tab(&u, TAB)?;
     let id = b.get("id").and_then(Value::as_i64).unwrap_or(0);
-    let by: Option<String> = sqlx::query_scalar("SELECT CAST(operator AS CHAR) FROM stock_used WHERE id = ? AND voided = 0").bind(id).fetch_optional(&s.db).await?;
-    let Some(by) = by else { return Err(AppError::bad("That one was already put back.")) };
+    let _one_at_a_time = GATE.lock().await;
+    let mut db = s.db.acquire().await?;
+    let row = sqlx::query("SELECT CAST(operator AS CHAR), CAST(source AS CHAR), CAST(ref AS SIGNED), CAST(qty AS SIGNED) FROM stock_used WHERE id = ? AND voided = 0").bind(id).fetch_optional(&mut *db).await?;
+    let Some(row) = row else { return Err(AppError::bad("That one was already put back.")) };
+    let (by, source, item_id, qty) = (text(&row, 0), text(&row, 1), row.try_get_unchecked::<i64, _>(2).unwrap_or(0), row.try_get_unchecked::<i64, _>(3).unwrap_or(0));
     if !u.is_admin() && by != u.name {
         return Err(AppError::Forbidden("Only an admin or the person who used it can put it back.".into()));
     }
-    sqlx::query("UPDATE stock_used SET voided = 1, voided_by = ?, voided_at = ? WHERE id = ? AND voided = 0").bind(&u.name).bind(now_minute()).bind(id).execute(&s.db).await?;
+    let Some(now) = current_qty(&mut db, &s, &source, item_id).await? else { return Err(AppError::bad("That stock item is gone, so the quantity cannot be put back.")) };
+    write_qty(&s, &u, &source, item_id, now + qty).await?;
+    sqlx::query("UPDATE stock_used SET voided = 1, voided_by = ?, voided_at = ? WHERE id = ? AND voided = 0").bind(&u.name).bind(now_minute()).bind(id).execute(&mut *db).await?;
     s.bump();
     Ok(Json(json!({ "ok": true })))
-}
-
-/// How much of every stock item has been used: {"order:12": 1, "kohls:3": 2}, for the Stocks cards.
-pub async fn summary(_u: CurrentUser, State(s): State<AppState>) -> AppResult<Json<Value>> {
-    let rows = sqlx::query("SELECT CAST(source AS CHAR), CAST(ref AS SIGNED), CAST(SUM(qty) AS SIGNED) FROM stock_used WHERE voided = 0 GROUP BY source, ref").fetch_all(&s.db).await?;
-    let used: serde_json::Map<String, Value> = rows.iter().map(|r| (format!("{}:{}", text(r, 0), r.try_get_unchecked::<i64, _>(1).unwrap_or(0)), json!(r.try_get_unchecked::<i64, _>(2).unwrap_or(0)))).collect();
-    Ok(Json(json!({ "used": used })))
 }
 
 #[cfg(test)]
@@ -220,6 +206,7 @@ mod tests {
         assert_eq!(qty_of("1,200"), 1200);
         assert_eq!(qty_of(""), 1); // blank means one
         assert_eq!(qty_of("abc"), 1);
-        assert_eq!(qty_of("0"), 1);
+        assert_eq!(qty_of("0"), 0); // all used
+        assert_eq!(qty_of("-2"), 0);
     }
 }

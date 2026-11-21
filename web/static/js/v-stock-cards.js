@@ -74,16 +74,11 @@ export async function mount(el, params, ctx) {
     } while (rows.length < total);
     kohlsRows = (await api("/api/kohls")).rows;
     items = [...rows.map((r) => ({ kind: "order", r })), ...kohlsRows.map((r) => ({ kind: "kohls", r }))];
-    // what was used from each item in Use Stock: the quantity left is its QTY minus that, and an item with none left is not stock any more
-    let used = {};
-    try { used = (await api("/api/stockuse/summary")).used || {}; } catch { /* the cards still show, without the used counts */ }
-    for (const it of items) {
+    // Use Stock takes the quantity off the QTY, so an item whose QTY reached 0 is all used and leaves the cards (a blank QTY counts as 1)
+    items = items.filter((it) => {
       const n = parseFloat(String(it.kind === "order" ? val(it.r, "QTY") : it.r.qty ?? "").replace(/,/g, ""));
-      it.total = n > 0 ? Math.round(n) : 1; // a blank QTY counts as 1
-      it.used = used[`${it.kind === "order" ? "order" : "kohls"}:${it.kind === "order" ? it.r[0] : it.r.id}`] || 0;
-      it.left = Math.max(it.total - it.used, 0);
-    }
-    items = items.filter((it) => it.left > 0);
+      return Number.isNaN(n) || n > 0;
+    });
     items.sort((a, b) => numberOf(b) - numberOf(a)); // the highest stock number first
   }
 
@@ -165,7 +160,6 @@ export async function mount(el, params, ctx) {
         ${field("Product Name:", `<small>${esc(v("Product Name"))}</small>`)}
         ${field("Brand:", `<small>${esc(v("Brand"))}</small>`)}
         ${field("Quantity of this Product:", esc(v("QTY")))}
-        ${it.used ? field("In stock now:", `<b>${it.left}</b> <span class="muted">(${it.used} used)</span>`) : ""}
         <hr>
         ${field("Amazon Order Number:", `<small>${esc(v("Source Order Number"))}</small>`)}
         ${field("Amazon Tracking Number:", `<small>${esc(v("Source Tracking Number").replace(/\s*\|\s*/g, " | "))}</small>`)}
@@ -194,7 +188,6 @@ export async function mount(el, params, ctx) {
         ${field("Product Name:", `<small>${esc(r.product)}</small>`)}
         ${field("Order Number:", `<small>${esc(r.order_number)}</small>`)}
         ${field("Quantity of this Product:", esc(r.qty))}
-        ${it.used ? field("In stock now:", `<b>${it.left}</b> <span class="muted">(${it.used} used)</span>`) : ""}
         <hr>
         ${field("Good Condition:", `<span class="flag ${r.good === "TRUE" ? "yes" : ""}">${flag(r.good)}</span>`)}
         ${field("Shipped to Customer:", `<span class="flag ${r.used === "TRUE" ? "yes" : ""}">${flag(r.used)}</span>`)}
