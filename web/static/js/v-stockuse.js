@@ -1,81 +1,12 @@
-// Use Stock: send a product to a customer from the stock that was set aside, and see what has been used.
-// Process: type the STOCK NO., choose the stock item and say how many. That many comes straight off the item's QTY (in the Stocks cards
-// and in All Orders); at 0 it leaves the Stocks cards. A mistake can be put back from the Used list.
+// Stock History: what has been used from stock (who, when, how many). Using stock happens on the cards of Order Cards > Stocks.
+// A mistake can be put back from here.
 import { $, api, brand, debounce, esc, fmt, toast } from "./util.js";
 
-const SOURCE = { order: "All Orders", kohls: "Kohl's Returns" };
-const isUrl = (v) => /^https?:\/\//.test(v || "");
-const field = (name, html) => (html.replace(/<[^>]*>/g, "").trim() === "" ? "" : `<div class="cf"><span class="cl">${esc(name)}</span><div class="cv">${html}</div></div>`);
-
 export async function mount(el, params, ctx) {
-  const tab = params.get("tab") === "used" ? "used" : "process";
-  el.innerHTML = `<div class="section-head"><div><div class="eyebrow">${esc(brand.name)}</div><h2>Use Stock</h2>
-      <p>Send a product to a customer from the stock that was set aside. It comes off the QTY of the stock card. Times are US Eastern.</p></div>
-      <div class="cardtabs"><a href="#stockuse"${tab === "process" ? ' class="on"' : ""}>Process</a><a href="#stockuse?tab=used"${tab === "used" ? ' class="on"' : ""}>Used from stock</a></div></div>
+  el.innerHTML = `<div class="section-head"><div><div class="eyebrow">${esc(brand.name)}</div><h2>Stock History</h2>
+      <p>The products used from stock. To use stock, press Use Stock on a card in Order Cards &gt; Stocks. Times are US Eastern.</p></div></div>
     <div id="su"></div>`;
-  const root = $("#su");
-  return tab === "used" ? usedView(root, ctx) : processView(root);
-}
-
-// ---------------------------------------------------------------- process
-function processView(root) {
-  root.innerHTML = `<div class="panel" style="margin-bottom:14px"><form id="suFind" class="btnrow" style="align-items:end">
-      <label class="field" style="flex:1;min-width:240px;margin:0"><span>STOCK NO.</span><input id="suNo" name="no" autocomplete="off" spellcheck="false" placeholder="Type or scan the stock number" autofocus></label>
-      <button class="btn primary" type="submit">Find</button></form></div>
-    <div class="cardgrid" id="suItems"></div>`;
-  const input = $("#suNo"), box = $("#suItems");
-  let items = [], last = "";
-
-  const itemCard = (it, n) => {
-    const none = it.remaining <= 0;
-    return `<article class="ocard" data-n="${n}">
-      ${isUrl(it.image) ? `<div class="oc-img"><img loading="lazy" referrerpolicy="no-referrer" src="${esc(it.image)}" alt=""></div>` : `<div class="oc-img none"></div>`}
-      <div class="oc-body">
-        ${field("STOCK NO.:", `<b>${esc(it.stock_no)}</b>`)}
-        ${field("Store:", esc(it.store))}
-        ${field("SKU:", esc(it.sku))}
-        ${field("Product Name:", `<small>${esc(it.product)}</small>`)}
-        ${field("From:", esc(SOURCE[it.source] || it.source))}
-        <hr>
-        <div class="cf"><span class="cl">In stock now (QTY):</span><div class="cv"><b style="font-size:1.3em">${fmt(it.remaining)}</b></div></div>
-        ${none ? `<p class="muted">Nothing left of this one.</p>` : `<hr>
-        <div class="formgrid" style="grid-template-columns:110px 1fr"><label class="field"><span>Qty to use</span><input class="su-qty" type="number" min="1" max="${it.remaining}" value="1" inputmode="numeric"></label>
-          <label class="field"><span>Note (optional)</span><input class="su-note" maxlength="500" autocomplete="off"></label></div>`}
-      </div>
-      ${none ? "" : `<div class="oc-actions"><button class="btn primary" data-use="${n}">Use from stock</button></div>`}
-    </article>`;
-  };
-  const draw = (msg) => {
-    box.innerHTML = items.length ? items.map(itemCard).join("") : `<div class="empty">${msg || ""}</div>`;
-  };
-
-  async function find(no) {
-    last = no;
-    if (!no) { items = []; return draw(""); }
-    try {
-      items = (await api("/api/stockuse/find?" + new URLSearchParams({ stock_no: no }))).items;
-      draw(`No stock with the STOCK NO. "${esc(no)}". Check the number, or that Stock is ticked on that order in All Orders.`);
-      if (items.length === 1) box.querySelector(".su-qty")?.select();
-    } catch (e) { toast(e.message, "bad"); }
-  }
-  $("#suFind").onsubmit = (e) => { e.preventDefault(); find(input.value.trim()); };
-
-  box.onclick = async (e) => {
-    const b = e.target.closest("[data-use]");
-    if (!b) return;
-    const card = b.closest("article"), it = items[+b.dataset.use];
-    const qty = parseInt(card.querySelector(".su-qty").value, 10), note = card.querySelector(".su-note").value.trim();
-    if (!(qty >= 1)) return toast("Enter how many to use (1 or more).", "bad");
-    if (qty > it.remaining) return toast(`Only ${it.remaining} left in stock.`, "bad");
-    b.disabled = true;
-    try {
-      const out = await api("/api/stockuse/use", { source: it.source, ref: it.ref, qty, note });
-      toast(`Used ${qty} of ${it.stock_no}. ${out.item ? out.item.remaining : 0} left.`);
-      await find(last);
-      input.select();
-    } catch (err) { toast(err.message, "bad"); b.disabled = false; }
-  };
-  input.focus();
+  return usedView($("#su"), ctx);
 }
 
 // ---------------------------------------------------------------- used

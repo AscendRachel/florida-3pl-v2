@@ -7,7 +7,7 @@ const VIEWS = {
   dashboard: { label: "Dashboard", mod: "./v-dashboard.js" },
   scan: { label: "Scan", mod: "./v-scan.js" },
   cards: { label: "Order Cards", mod: "./v-cards.js" },
-  stockuse: { label: "Use Stock", mod: "./v-stockuse.js" },
+  stockuse: { label: "Stock History", mod: "./v-stockuse.js" },
   orders: { label: "All Orders", mod: "./v-orders.js" },
   returns: { label: "Returns", mod: "./v-returns.js" },
   materials: { label: "Materials", mod: "./v-materials.js" },

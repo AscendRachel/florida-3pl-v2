@@ -142,6 +142,13 @@ export async function mount(el, params, ctx) {
   const picture = (img, key) => (isUrl(img) ? `<div class="oc-img"><img loading="lazy" referrerpolicy="no-referrer" src="${esc(img)}" alt="" data-zoom="${esc(key)}"></div>` : `<div class="oc-img none"></div>`);
   const keyOf = (it) => (it.kind === "order" ? "o" + it.r[0] : "k" + it.r.id);
   const find = (key) => items.find((it) => keyOf(it) === key);
+  // Use Stock is for the office: warehouse users do not get the button (the server refuses them as well)
+  const canUse = ctx.me?.role !== "warehouse";
+  const useBtn = (key) => (canUse ? `<button class="btn" data-use="${key}">Use Stock</button>` : "");
+  const qtyLeft = (it) => {
+    const n = parseInt(String(it.kind === "order" ? val(it.r, "QTY") : it.r.qty ?? "").replace(/,/g, ""), 10);
+    return Number.isNaN(n) ? 1 : Math.max(n, 0); // a blank QTY counts as 1
+  };
 
   function orderCard(it) {
     const r = it.r, v = (k) => val(r, k), key = keyOf(it);
@@ -173,7 +180,7 @@ export async function mount(el, params, ctx) {
         ${byKey["Store Refunded"] ? field(label("Store Refunded") + ":", `<span class="flag ${v("Store Refunded") === "TRUE" ? "yes" : ""}">${flag(v("Store Refunded"))}</span>`) : ""}
         ${byKey["Buying Cost"] ? field(label("Buying Cost") + ":", esc(v("Buying Cost"))) : ""}
       </div>
-      <div class="oc-actions">${canPrint ? `<button class="btn primary" data-print="${key}">Print label</button>` : ""}<button class="btn${canPrint ? "" : " primary"}" data-edit="${key}">Edit</button></div>
+      <div class="oc-actions">${useBtn(key)}${canPrint ? `<button class="btn primary" data-print="${key}">Print label</button>` : ""}<button class="btn${canPrint ? "" : " primary"}" data-edit="${key}">Edit</button></div>
     </article>`;
   }
   function kohlsCard(it) {
@@ -193,7 +200,7 @@ export async function mount(el, params, ctx) {
         ${field("Shipped to Customer:", `<span class="flag ${r.used === "TRUE" ? "yes" : ""}">${flag(r.used)}</span>`)}
         ${field("Notes:", `<small>${esc(r.notes)}</small>`)}
       </div>
-      <div class="oc-actions"><button class="btn primary" data-edit="${key}">Edit</button></div>
+      <div class="oc-actions">${useBtn(key)}<button class="btn primary" data-edit="${key}">Edit</button></div>
     </article>`;
   }
   const card = (it) => (it.kind === "order" ? orderCard(it) : kohlsCard(it));
@@ -270,6 +277,30 @@ export async function mount(el, params, ctx) {
       redraw(false);
     } catch (e) { toast(e.message, "bad"); }
   }
+  // send some of this stock to a customer: that many come off the QTY, at 0 the card leaves; a mistake is put back in Stock History
+  async function useStock(it) {
+    const left = qtyLeft(it), no = stockNo(it);
+    const res = await dialog({
+      enterSaves: true,
+      title: `Use Stock ${no}`,
+      body: `<p class="muted">${esc(it.kind === "order" ? val(it.r, "Product Name") : it.r.product || "")}</p>
+        <p>In stock now (QTY): <b>${fmt(left)}</b></p>
+        <label class="field"><span>Qty to use</span><input name="qty" type="number" min="1" max="${left}" value="1" inputmode="numeric" required></label>
+        <label class="field"><span>Note (optional)</span><input name="note" maxlength="500" autocomplete="off"></label>`,
+      actions: [["Cancel", "close"], ["Use from stock", "ok", "primary"]],
+    });
+    if (res.value !== "ok") return;
+    const f = new FormData(res.el.querySelector("form"));
+    const qty = parseInt(String(f.get("qty") ?? ""), 10), note = String(f.get("note") ?? "").trim();
+    if (!(qty >= 1)) return toast("Enter how many to use (1 or more).", "bad");
+    if (qty > left) return toast(`Only ${left} left in stock.`, "bad");
+    try {
+      const out = await api("/api/stockuse/use", { source: it.kind, ref: it.kind === "order" ? it.r[0] : it.r.id, qty, note });
+      toast(`Used ${qty} of ${no}. ${out.item ? out.item.remaining : 0} left.`);
+      await loadAll();
+      redraw(false);
+    } catch (e) { toast(e.message, "bad"); }
+  }
   async function printLabel(it, btn) {
     btn.disabled = true;
     try { await printPages(await labelPages(`/api/label?rn=${it.r[0]}`)); } catch (e) { toast(`PRINT ERROR: ${e.message}`, "bad"); }
@@ -287,6 +318,8 @@ export async function mount(el, params, ctx) {
     if (t.closest("#loadMore")) { shown += PAGE; return redraw(false); }
     const ed = t.closest("[data-edit]");
     if (ed) { const it = find(ed.dataset.edit); return it && (it.kind === "order" ? editOrder(it) : editKohls(it)); }
+    const us = t.closest("[data-use]");
+    if (us) { const it = find(us.dataset.use); return it && canUse && useStock(it); }
     const pr = t.closest("[data-print]");
     if (pr) { const it = find(pr.dataset.print); return it && printLabel(it, pr); }
     const z = t.closest("[data-zoom]");

@@ -83,9 +83,19 @@ async fn write_qty(s: &AppState, u: &User, source: &str, id: i64, qty: i64) -> A
     Ok(())
 }
 
+/// Using stock (and putting it back) is for the office; warehouse users only see the Stock History.
+fn not_warehouse(u: &User) -> AppResult<()> {
+    if u.role == "warehouse" {
+        Err(AppError::Forbidden("Using stock is not open to warehouse users.".into()))
+    } else {
+        Ok(())
+    }
+}
+
 /// The stock items with this STOCK NO. (and how much of each is left).
 pub async fn find(CurrentUser(u): CurrentUser, State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> AppResult<Json<Value>> {
-    need_tab(&u, TAB)?;
+    need_tab(&u, "cards")?;
+    not_warehouse(&u)?;
     let no = clip(q.get("stock_no").map(String::as_str).unwrap_or(""), 100);
     if no.is_empty() {
         return Ok(Json(json!({ "items": [] })));
@@ -114,7 +124,8 @@ pub async fn find(CurrentUser(u): CurrentUser, State(s): State<AppState>, Query(
 
 /// Take `qty` of a stock item: it comes off the QTY.
 pub async fn use_stock(CurrentUser(u): CurrentUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
-    need_tab(&u, TAB)?;
+    need_tab(&u, "cards")?;
+    not_warehouse(&u)?;
     let source = b.get("source").and_then(Value::as_str).unwrap_or("");
     if source != "order" && source != "kohls" {
         return Err(AppError::bad("Pick the stock item first."));
@@ -170,7 +181,7 @@ pub async fn used(CurrentUser(u): CurrentUser, State(s): State<AppState>, Query(
         .map(|r| {
             let by = text(r, 2);
             json!({ "id": r.try_get_unchecked::<i64, _>(0).unwrap_or(0), "at": text(r, 1), "by": by, "source": text(r, 3), "stock_no": text(r, 4), "sku": text(r, 5), "product": text(r, 6),
-                    "qty": r.try_get_unchecked::<i64, _>(7).unwrap_or(0), "order_ref": text(r, 8), "note": text(r, 9), "can_undo": u.is_admin() || by == u.name })
+                    "qty": r.try_get_unchecked::<i64, _>(7).unwrap_or(0), "order_ref": text(r, 8), "note": text(r, 9), "can_undo": u.role != "warehouse" && (u.is_admin() || by == u.name) })
         })
         .collect();
     Ok(Json(json!({ "rows": rows, "total_qty": total })))
@@ -179,6 +190,7 @@ pub async fn used(CurrentUser(u): CurrentUser, State(s): State<AppState>, Query(
 /// Put a use back (a mistake): the quantity goes back on the stock item's QTY and the row leaves the Used list.
 pub async fn undo(CurrentUser(u): CurrentUser, State(s): State<AppState>, Json(b): Json<Value>) -> AppResult<Json<Value>> {
     need_tab(&u, TAB)?;
+    not_warehouse(&u)?;
     let id = b.get("id").and_then(Value::as_i64).unwrap_or(0);
     let _one_at_a_time = GATE.lock().await;
     let mut db = s.db.acquire().await?;
