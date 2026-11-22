@@ -68,12 +68,33 @@ export async function api(path, body, opts = {}) {
       init.headers["Content-Type"] = "application/json";
     }
   }
-  const r = await fetch(path, init);
+  // A request that never answers (a dropped connection, a stalled proxy) must not leave the page on "Loading…" for good, and its
+  // waiting connection must not pile up with the polls behind it. So every call has a time limit, and a read is tried again.
+  const upload = body instanceof ArrayBuffer || body instanceof Blob;
+  const readOnly = body === undefined || String(path).split("?")[0] === "/api/orders"; // the table's page loads are POSTs that only read
+  const limit = opts.timeout ?? (body === undefined ? 20000 : upload ? 600000 : 120000);
+  let r, t;
+  for (let attempt = 0; ; attempt++) {
+    const ctl = new AbortController();
+    t = setTimeout(() => ctl.abort(), limit); // it keeps running while the answer is read, so a half-sent answer cannot hang either
+    try {
+      r = await fetch(path, { ...init, signal: ctl.signal });
+      if (r.status >= 502 && r.status <= 504 && readOnly && attempt < 2) { clearTimeout(t); await new Promise((ok) => setTimeout(ok, 700 * (attempt + 1))); continue; }
+      break;
+    } catch (e) {
+      clearTimeout(t);
+      const stalled = e.name === "AbortError";
+      if (readOnly && attempt < 2) { await new Promise((ok) => setTimeout(ok, 700 * (attempt + 1))); continue; } // reading is safe to repeat
+      throw new ApiError(stalled ? "The server took too long to answer. Check the connection and try again." : "Cannot reach the server. Check the connection and try again.");
+    }
+  }
   if (r.status === 401) {
+    clearTimeout(t);
     location.href = "/login";
     throw new ApiError("Please sign in.");
   }
   const j = await r.json().catch(() => ({}));
+  clearTimeout(t);
   if (!r.ok) throw new ApiError(j.error || `Error ${r.status}${r.status === 404 ? " (" + String(path).split("?")[0] + " was not found on the server. If you just updated, restart the server)" : ""}`);
   return j;
 }

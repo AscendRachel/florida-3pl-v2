@@ -77,7 +77,7 @@ document.addEventListener("click", async (e) => {
 let loadedBuild = null, newVersion = false;
 async function checkBuild() {
   try {
-    const { build, version } = await (await fetch("/api/build", { cache: "no-store" })).json();
+    const { build, version } = await (await fetch("/api/build", { cache: "no-store", signal: AbortSignal.timeout(10000) })).json();
     if (loadedBuild === null) {
       loadedBuild = build;
       document.body.insertAdjacentHTML("beforeend", `<div class="build-tag" title="The version of the app this page is running (build ${build.slice(0, 6)})">version ${version}</div>`);

@@ -93,7 +93,7 @@ impl AppState {
 async fn connect(config: &config::Config) -> anyhow::Result<MySqlPool> {
     tracing::info!("connecting to the database at {}", config.database_host());
     let db = MySqlPoolOptions::new()
-        .max_connections(10)
+        .max_connections(20)
         .acquire_timeout(std::time::Duration::from_secs(10))
         .connect(&config.database_url)
         .await
