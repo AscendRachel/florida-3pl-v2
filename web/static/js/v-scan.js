@@ -82,7 +82,7 @@ export async function mount(el, params, ctx) {
         ${r.by_hand ? `<div class="sc-notes"><span class="muted">Marked received by hand:</span> <b>${r.by_hand} box${r.by_hand === 1 ? "" : "es"}</b> (no scan)</div>` : ""}
         <p class="sc-msg">${esc(r.message)}</p>
         ${(r.tbas || []).length > 1 ? `<div class="sc-tbas"><span class="muted">TBA numbers of this order:</span> ${r.tbas.map((t) => `<span class="pill ${t.got ? "s-ok" : "s-neutral"} mono" title="${t.got ? "this box is here" : "not scanned yet"}">${t.got ? "✓ " : ""}${esc(t.code)}</span>`).join(" ")}</div>` : ""}
-        ${(r.siblings || []).length ? `<div class="banner sc-warn">Another item in this customer order is on hold: ${r.siblings.map((s) => esc(s.label)).join(", ")}</div>` : ""}
+        ${(r.siblings || []).length ? `<div class="banner sc-warn">Another item in this customer order is on hold: ${r.siblings.map((s) => esc(s.label) + (s.tracking ? ` <span class="mono">(${esc(s.tracking.split("|").map((t) => t.trim()).filter(Boolean).join(", "))})</span>` : "")).join("; ")}</div>` : ""}
         ${r.outcome === "count" ? `<form class="sc-count" data-count="${i}"><label class="field" style="margin:0"><span>Items in this package (the order is for ${r.qty_declared}${r.items_received ? `, ${r.items_received} already received` : ""})</span>
           <input type="number" min="0" max="9999" inputmode="numeric" name="items" value="${r.qty_declared - r.items_received}" required></label>
           <button class="btn primary" type="submit">Confirm count</button></form>` : ""}
@@ -274,7 +274,7 @@ export async function mount(el, params, ctx) {
       const od = h.holds.filter((x) => x.overdue).length;
       $("#holdNote").textContent = h.holds.length ? `${fmt(h.holds.length)} waiting${od ? ` · ${od} overdue` : ""}` : "";
       $("#holds").innerHTML = h.holds.length ? `<div class="tablewrap" style="max-height:340px"><table style="min-width:0"><thead><tr><th>Item</th><th class="num">Boxes</th><th class="num">Items</th><th>On hold</th><th></th></tr></thead><tbody>${h.holds.slice(0, 100).map((x) =>
-        `<tr><td><b class="mono">${esc(x.label)}</b><div class="muted clip">${esc(x.product)}</div></td><td class="num">${x.received} / ${x.expected}</td><td class="num">${x.qty_total > 1 ? `${x.items} / ${x.qty_total}` : "—"}</td>
+        `<tr><td><b class="mono">${esc(x.label)}</b><div class="muted clip">${esc(x.product)}</div>${x.tracking ? `<div class="muted mono sc-hold-tba">${esc(x.tracking.split("|").map((t) => t.trim()).filter(Boolean).join(" · "))}</div>` : ""}</td><td class="num">${x.received} / ${x.expected}</td><td class="num">${x.qty_total > 1 ? `${x.items} / ${x.qty_total}` : "—"}</td>
           <td>${x.hours == null ? "—" : `${x.hours >= 48 ? Math.round(x.hours / 24) + " d" : Math.round(x.hours) + " h"}`} ${x.overdue ? `<span class="pill s-crit">Overdue</span>` : ""}</td>
           <td>${x.overdue ? `<button class="btn small" data-release="${x.rn}">Ship now</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Nothing is on hold.</p>`;
       $("#recent").innerHTML = r.scans.length ? `<div class="tablewrap" style="max-height:340px"><table style="min-width:0"><tbody>${r.scans.map((s) => {

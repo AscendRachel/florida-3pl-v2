@@ -159,9 +159,9 @@ async fn siblings_on_hold(tx: &mut Tx<'_>, sch: &Schema, d: &Order) -> AppResult
     if d.g("Store Order No.").is_empty() {
         return Ok(json!([]));
     }
-    let sql = format!("SELECT {}, {} FROM orders_text WHERE {} = ? AND rn <> ? AND {} = 'TRUE'", sch.c("Label Number"), sch.c("Product Name"), sch.c("Store Order No."), sch.c("ITEM ON HOLD"));
+    let sql = format!("SELECT {}, {}, {} FROM orders_text WHERE {} = ? AND rn <> ? AND {} = 'TRUE'", sch.c("Label Number"), sch.c("Product Name"), sch.c("Source Tracking Number"), sch.c("Store Order No."), sch.c("ITEM ON HOLD"));
     let rows = sqlx::query(&sql).bind(d.g("Store Order No.")).bind(d.rn).fetch_all(&mut **tx).await?;
-    Ok(json!(rows.iter().map(|r| json!({ "label": r.try_get_unchecked::<String, _>(0).unwrap_or_default(), "product": r.try_get_unchecked::<String, _>(1).unwrap_or_default() })).collect::<Vec<_>>()))
+    Ok(json!(rows.iter().map(|r| json!({ "label": r.try_get_unchecked::<String, _>(0).unwrap_or_default(), "product": r.try_get_unchecked::<String, _>(1).unwrap_or_default(), "tracking": r.try_get_unchecked::<String, _>(2).unwrap_or_default() })).collect::<Vec<_>>()))
 }
 
 fn r1(x: f64) -> f64 {

@@ -522,3 +522,4 @@ body.colmoving, body.colmoving * { cursor: grabbing !important; user-select: non
 .colmark { position: fixed; width: 3px; margin-left: -1px; background: var(--brand); z-index: 200; pointer-events: none; border-radius: 2px; }
 .sc-notes { margin-top: 4px; font-size: 14px; }
 .sc-tbas { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
+.sc-hold-tba { font-size: 11px; word-break: break-all; }
