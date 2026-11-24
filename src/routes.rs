@@ -105,6 +105,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notify/seen", post(crate::notify::seen))
         .route("/api/dashboard", get(crate::dashboard::dashboard))
         .route("/api/dashboard/operators", post(crate::dashboard::save_operators))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), version_js))
         .layer(TraceLayer::new_for_http())
         .layer(axum::middleware::from_fn(crate::security::harden))
         .with_state(state)
@@ -112,9 +113,37 @@ pub fn router(state: AppState) -> Router {
 
 // ---------------------------------------------------------------- pages
 
+/// The version of the app's files (a fingerprint of web/, worked out once: the files do not change while the program runs).
+fn file_tag(web_dir: &str) -> &'static str {
+    static TAG: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TAG.get_or_init(|| format!("{:012x}", build_id(std::path::Path::new(web_dir)) & 0xffff_ffff_ffff))
+}
+
+/// Every script and style of the pages is asked for with ?v=<version of the app>. Cloudflare tells browsers to keep a .js or .css file for
+/// hours whatever the server says, so after an update people kept the old files until a hard reload. A new version means new addresses,
+/// so the browser has to fetch them: a plain refresh (or "Reload now") is enough.
 async fn page(state: &AppState, name: &str) -> AppResult<Response> {
     let body = tokio::fs::read_to_string(format!("{}/{name}", state.config.web_dir)).await?;
+    let tag = file_tag(&state.config.web_dir);
+    let re = regex::Regex::new(r#""(/static/[\w./-]+\.(?:js|css))""#).expect("regex");
+    let body = re.replace_all(&body, |c: &regex::Captures| if c[1].starts_with("/static/vendor/") { c[0].to_string() } else { format!("\"{}?v={tag}\"", &c[1]) }).into_owned();
     Ok(([(CONTENT_TYPE, "text/html; charset=utf-8"), (CACHE_CONTROL, "no-store")], Html(body)).into_response())
+}
+
+/// The scripts of the app import each other by address; each of those addresses gets the same ?v=<version> so the whole set changes together.
+async fn version_js(State(s): State<AppState>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let path = req.uri().path().to_string();
+    let res = next.run(req).await;
+    if !(path.starts_with("/static/js/") && path.ends_with(".js")) || res.status() != StatusCode::OK {
+        return res;
+    }
+    let (mut parts, body) = res.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, 16 * 1024 * 1024).await else { return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
+    let tag = file_tag(&s.config.web_dir);
+    let re = regex::Regex::new(r#""((?:\./|/static/js/)[\w.-]+\.js)""#).expect("regex");
+    let text = re.replace_all(&String::from_utf8_lossy(&bytes), |c: &regex::Captures| format!("\"{}?v={tag}\"", &c[1])).into_owned();
+    parts.headers.remove(axum::http::header::CONTENT_LENGTH);
+    Response::from_parts(parts, axum::body::Body::from(text))
 }
 
 /// The app itself: only for a signed-in person, otherwise on to the sign-in page.
