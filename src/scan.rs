@@ -269,6 +269,22 @@ async fn evaluate(tx: &mut Tx<'_>, sch: &Schema, who: &str, d: &Order, code: &st
     Ok(result_for(d, "hold", &msg, with(json!({ "siblings": sib }))))
 }
 
+/// What the card shows besides the outcome, read after the scan was applied: the order's Notes (the partial delivery note), every TBA number
+/// of the order with whether its box has been scanned, and how many boxes were marked received by hand (no scan behind them).
+async fn extras(tx: &mut Tx<'_>, sch: &Schema, rn: u64, code: &str, dry: bool, res: &mut Value) -> AppResult<()> {
+    let Some(d) = get_order(tx, sch, rn).await? else { return Ok(()) };
+    let mut got: Vec<String> = sqlx::query_scalar::<_, String>("SELECT CAST(code AS CHAR) FROM boxes WHERE rn = ?").bind(rn).fetch_all(&mut **tx).await?.into_iter().map(|c| c.to_uppercase()).collect();
+    if dry && !got.iter().any(|c| c == code) {
+        got.push(code.to_string()); // a practice scan is not saved, but it counts on the card
+    }
+    let listed = tokens(d.g("Source Tracking Number"));
+    let in_list = got.iter().filter(|c| listed.contains(c)).count() as i64;
+    res["tbas"] = json!(listed.iter().map(|c| json!({ "code": c, "got": got.contains(c) })).collect::<Vec<_>>());
+    res["notes"] = json!(d.g("Notes"));
+    res["by_hand"] = json!((to_int(d.g("Boxes Received"), 0) - in_list.max(got.len() as i64)).max(0));
+    Ok(())
+}
+
 // ---------------------------------------------------------------- the actions
 
 async fn scan_code(tx: &mut Tx<'_>, sch: &Schema, who: &str, code: &str, dry: bool) -> AppResult<Value> {
@@ -290,7 +306,8 @@ async fn scan_code(tx: &mut Tx<'_>, sch: &Schema, who: &str, code: &str, dry: bo
     }
     let mut results = vec![];
     for d in &found {
-        let res = evaluate(tx, sch, who, d, &code, dry, None).await?;
+        let mut res = evaluate(tx, sch, who, d, &code, dry, None).await?;
+        extras(tx, sch, d.rn, &code, dry, &mut res).await?;
         if !dry {
             let msg: String = res["message"].as_str().unwrap_or("").chars().take(200).collect();
             log(tx, who, &code, Some(d.rn), res["outcome"].as_str().unwrap_or(""), &msg).await?;
@@ -313,7 +330,8 @@ async fn count_items(tx: &mut Tx<'_>, sch: &Schema, who: &str, rn: u64, code: &s
         return Err(AppError::bad("That is too many items."));
     }
     let d = get_order(tx, sch, rn).await?.ok_or_else(|| AppError::bad("That order no longer exists."))?;
-    let res = evaluate(tx, sch, who, &d, &code, dry, Some(items)).await?;
+    let mut res = evaluate(tx, sch, who, &d, &code, dry, Some(items)).await?;
+    extras(tx, sch, rn, &code, dry, &mut res).await?;
     if !dry {
         let msg: String = res["message"].as_str().unwrap_or("").chars().take(180).collect();
         log(tx, who, &code, Some(rn), res["outcome"].as_str().unwrap_or(""), &format!("counted {items}: {msg}")).await?;

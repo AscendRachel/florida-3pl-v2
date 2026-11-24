@@ -78,7 +78,10 @@ export async function mount(el, params, ctx) {
         ${r.store ? `<div class="sc-store"><span class="muted">Store:</span> <b>${esc(r.store)}</b></div>` : ""}
         <div class="muted">${esc([r.brand, r.qty && `Qty ${r.qty}`, r.customer].filter(Boolean).join(" · "))}</div>
         <div class="muted mono">${esc(r.label)} · ${esc(r.store_order)} · ${esc(r.source_order)}</div>
+        ${r.notes ? `<div class="sc-notes"><span class="muted">Notes:</span> ${esc(r.notes).split("\n").join("<br>")}</div>` : ""}
+        ${r.by_hand ? `<div class="sc-notes"><span class="muted">Marked received by hand:</span> <b>${r.by_hand} box${r.by_hand === 1 ? "" : "es"}</b> (no scan)</div>` : ""}
         <p class="sc-msg">${esc(r.message)}</p>
+        ${(r.tbas || []).length > 1 ? `<div class="sc-tbas"><span class="muted">TBA numbers of this order:</span> ${r.tbas.map((t) => `<span class="pill ${t.got ? "s-ok" : "s-neutral"} mono" title="${t.got ? "this box is here" : "not scanned yet"}">${t.got ? "✓ " : ""}${esc(t.code)}</span>`).join(" ")}</div>` : ""}
         ${(r.siblings || []).length ? `<div class="banner sc-warn">Another item in this customer order is on hold: ${r.siblings.map((s) => esc(s.label)).join(", ")}</div>` : ""}
         ${r.outcome === "count" ? `<form class="sc-count" data-count="${i}"><label class="field" style="margin:0"><span>Items in this package (the order is for ${r.qty_declared}${r.items_received ? `, ${r.items_received} already received` : ""})</span>
           <input type="number" min="0" max="9999" inputmode="numeric" name="items" value="${r.qty_declared - r.items_received}" required></label>
