@@ -27,8 +27,10 @@ export async function labelPages(url) {
   }
   const data = await res.arrayBuffer();
   const pdf = await (await loadPdfJs()).getDocument({ data }).promise;
+  const only = await fedexLabelPage(pdf);
   const pages = [];
   for (let n = 1; n <= pdf.numPages; n++) {
+    if (only && n !== only) continue;
     const page = await pdf.getPage(n);
     const size = page.getViewport({ scale: 1 });
     // Some labels (the return labels) come as a small page, about 2 x 3 inches. The printer paper is 4 x 6, so such a page is
@@ -52,10 +54,25 @@ export async function labelPages(url) {
     const fitted = big && box ? fitTo4x6(canvas, box) : null;
     pages.push({ ...(fitted || { img: canvas.toDataURL("image/png"), wIn, hIn }), big, fill, blank: !box });
   }
-  // A label PDF often comes with paperwork that goes in the package: a packing slip, a manifest, instructions (FedEx, Wayfair, ...).
+  // A label PDF can come with paperwork that goes in the package: a packing slip, a manifest, instructions (Wayfair, ...).
   // Every page with something on it is printed, each one shrunk to the label size (4 x 6 inch). Blank pages are left out.
+  // The 3-page FedEx file is the exception: only its label page was drawn above.
   const used = pages.filter((p) => !p.blank);
   return used.length ? used : pages;
+}
+
+// The FedEx file of 3 pages has the shipping label on page 2, and only that page is printed. It is known by its words ("FedEx", or the
+// "TRK#" printed on FedEx labels). Any other file, or one whose words cannot be read, gives null: all its pages are printed as before,
+// so a label is never left out by a wrong guess.
+async function fedexLabelPage(pdf) {
+  if (pdf.numPages !== 3) return null;
+  try {
+    for (let n = 1; n <= 3; n++) {
+      const text = (await (await pdf.getPage(n)).getTextContent()).items.map((i) => i.str).join(" ");
+      if (/fed\s?ex|TRK\s?#/i.test(text)) return 2;
+    }
+  } catch { /* unreadable words: print everything */ }
+  return null;
 }
 
 // The box round everything that is not white on a canvas: {x0, y0, x1, y1}, or null when it is blank.
